@@ -71,7 +71,7 @@ body {
   );
 }
 #landing h1 {
-  font-family: 'Playfair Display', serif;
+  font-family: Consolas, 'JetBrains Mono', 'Courier New', monospace;
   font-weight: 900;
   font-size: clamp(2rem, 5vw, 3.5rem);
   text-align: center;
@@ -136,6 +136,35 @@ body {
 .btn-analyze:active {
   transform: translateY(0);
 }
+
+.landing-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.btn-secondary {
+  margin-top: 1.25rem;
+  padding: 0.85rem 1.25rem;
+  background: var(--surface2);
+  color: var(--text);
+  font-weight: 700;
+  font-size: 0.92rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-secondary:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: translateY(-2px);
+}
+.btn-secondary:active {
+  transform: translateY(0);
+}
 #error-msg {
   color: var(--red);
   margin-top: 0.75rem;
@@ -177,7 +206,7 @@ body {
   border-bottom: 1px solid var(--border);
 }
 .dash-header h2 {
-  font-family: 'Playfair Display', serif;
+  font-family: Consolas, 'JetBrains Mono', 'Courier New', monospace;
   font-weight: 900;
   font-size: clamp(1.5rem, 3vw, 2.2rem);
   background: linear-gradient(135deg, #e2e8f0, #38bdf8);

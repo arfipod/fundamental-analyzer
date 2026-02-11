@@ -7,6 +7,7 @@ export const I18N = {
     language: 'Idioma',
     industry: 'Industria GICS',
     analyze: 'Analizar Financieros',
+    loadDemoData: 'Modo prueba (AAPL)',
     includeAnalystNoise: 'Incluir ruido de analistas en el resumen',
     customProfileHint:
       'El perfil personalizado sobreescribe solo los umbrales activos.',
@@ -42,6 +43,7 @@ export const I18N = {
     language: 'Language',
     industry: 'GICS Industry',
     analyze: 'Analyze Financials',
+    loadDemoData: 'Demo mode (AAPL)',
     includeAnalystNoise: 'Include analyst noise in summary',
     customProfileHint: 'Custom profile overrides active thresholds only.',
     dataPlaceholder:
