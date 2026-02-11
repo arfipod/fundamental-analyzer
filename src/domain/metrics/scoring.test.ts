@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 
-import { renderDashboard, analyze, setLanguage } from './scoring';
+import {
+  renderDashboard,
+  analyze,
+  setLanguage,
+  onLanguageChange
+} from './scoring';
 
 type MetricItem = {
   name?: string;
@@ -300,5 +305,93 @@ describe('analysis regressions for alignment and period handling', () => {
     expect(currentRatio).toBeTruthy();
     expect(currentRatio?.detail).toContain('1.60');
     expect(currentRatio?.signalText).toMatch(/Healthy|Adequate|Very Healthy/);
+  });
+});
+
+
+describe('i18n safeguards and bidirectional localization', () => {
+  it('notifies language listeners and supports unsubscribe', () => {
+    const events: string[] = [];
+    const off = onLanguageChange((lang: string) => events.push(lang));
+
+    setLanguage('en');
+    setLanguage('es');
+    off();
+    setLanguage('en');
+
+    expect(events).toEqual(['en', 'es']);
+  });
+
+  it('keeps stable fallback text when a translation key is missing in one language', () => {
+    const originalI18n = (window as Window & { I18N?: unknown }).I18N;
+    window.I18N = {
+      en: {} as (typeof window.I18N)['en'],
+      es: {} as (typeof window.I18N)['es']
+    };
+
+    document.body.innerHTML = '<span data-i18n="onlyEn">Texto base</span>';
+    setLanguage('en');
+    expect(document.querySelector('[data-i18n="onlyEn"]')?.textContent).toBe(
+      'Texto base'
+    );
+
+    setLanguage('es');
+    expect(document.querySelector('[data-i18n="onlyEn"]')?.textContent).toBe(
+      'Texto base'
+    );
+
+    (window as Window & { I18N?: unknown }).I18N = originalI18n;
+  });
+
+  it('translates spanish financial labels back to english in dynamic text when language is en', () => {
+    setLanguage('en');
+
+    const html = renderDashboard(
+      { company: 'Caja Corp' },
+      makeResults({
+        detail: 'Caja actual: Efectivo y equivalentes',
+        signalText: 'Datos insuficientes'
+      })
+    );
+
+    expect(html).toContain('Cash And Equivalents');
+    expect(html).not.toContain('Efectivo y equivalentes');
+  });
+
+  it('translates dynamic text from spanish to english when current language is en', () => {
+    setLanguage('en');
+
+    const html = renderDashboard(
+      { company: 'Acme Corp' },
+      {
+        overall: 'good',
+        overallScore: 3,
+        scores: {},
+        totalMetrics: 1,
+        sections: [
+          {
+            id: 'growth',
+            icon: '📈',
+            title: 'Crecimiento',
+            grade: 'good',
+            items: [
+              {
+                name: 'Crecimiento de Ingresos (CAGR)',
+                detail: 'Datos insuficientes',
+                confidence: 0.7,
+                signal: 'neutral',
+                signalText: 'Datos insuficientes',
+                values: [null],
+                labels: ['2024']
+              }
+            ]
+          }
+        ]
+      }
+    );
+
+    expect(html).toContain('Growth');
+    expect(html).toContain('Revenue Growth (CAGR)');
+    expect(html).toContain('Insufficient data');
   });
 });

@@ -571,13 +571,6 @@ function localizeDynamicText(text) {
   if (!text) return text;
   let out = normalizeLabelText(String(text));
 
-  const financialEntries =
-    currentLang === 'es' ? FIN_LABEL_ENTRIES : FIN_LABEL_ENTRIES_REVERSED;
-  financialEntries.forEach(([from, to]) => {
-    const re = new RegExp(escapeRegExp(from), 'g');
-    out = out.replace(re, to);
-  });
-
   const metricEntries =
     currentLang === 'es' ? METRIC_ENTRIES : METRIC_ENTRIES_REVERSED;
   metricEntries.forEach(([from, to]) => {
@@ -594,6 +587,13 @@ function localizeDynamicText(text) {
     currentLang === 'es' ? FRAG_ENTRIES : FRAG_ENTRIES_REVERSED;
   fragmentEntries.forEach(([from, to]) => {
     out = out.replaceAll(from, to);
+  });
+
+  const financialEntries =
+    currentLang === 'es' ? FIN_LABEL_ENTRIES : FIN_LABEL_ENTRIES_REVERSED;
+  financialEntries.forEach(([from, to]) => {
+    const re = new RegExp(escapeRegExp(from), 'g');
+    out = out.replace(re, to);
   });
 
   return out;
