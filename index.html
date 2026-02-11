@@ -1,59 +1,16 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Fundamental Analyzer</title>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,500;0,9..40,700&family=JetBrains+Mono:wght@400;600&family=Playfair+Display:wght@700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./styles.css">
-</head>
-<body>
-<div id="landing">
-  <h1 data-i18n="appTitle">Fundamental Analyzer</h1>
-  <p class="subtitle" data-i18n="subtitle">Pega los datos financieros de TIKR y obtén un diagnóstico instantáneo de salud</p>
-  <div class="input-wrap">
-    <textarea id="dataInput" data-i18n-placeholder="dataPlaceholder" placeholder=""></textarea>
-    <div style="display:flex;justify-content:center;gap:.5rem;align-items:center;margin:.6rem 0;">
-      <label for="langSelect" class="mono" style="font-size:.8rem;color:var(--text-dim)" data-i18n="language">Idioma</label>
-      <select id="langSelect" class="profile-select" aria-label="Language selector">
-        <option value="es">Español 🇪🇸</option>
-        <option value="en">English 🇬🇧</option>
-      </select>
-    </div>
-    <div style="display:flex;justify-content:center">
-      <select id="profileSelect" class="profile-select" aria-label="Industry profile">
-        <option value="auto" data-i18n="profile.auto">Perfil: Auto (inferir)</option>
-        <option value="default" data-i18n="profile.default">Perfil: Default</option>
-        <option value="saas" data-i18n="profile.saas">Perfil: SaaS / Ligero en activos</option>
-        <option value="retail" data-i18n="profile.retail">Perfil: Retail / Distribución</option>
-        <option value="industrial" data-i18n="profile.industrial">Perfil: Industrial</option>
-        <option value="financial" data-i18n="profile.financial">Perfil: Financieras</option>
-        <option value="utility" data-i18n="profile.utility">Perfil: Utility / Telecom</option>
-        <option value="custom" data-i18n="profile.custom">Perfil: JSON personalizado</option>
-      </select>
-    </div>
-    <div style="display:flex;justify-content:center;flex-direction:column;align-items:center;margin-top:.55rem;">
-      <label for="industrySelect" class="mono" style="font-size:.8rem;color:var(--text-dim)" data-i18n="industry">Industria GICS</label>
-      <select id="industrySelect" class="profile-select" aria-label="GICS industry selector"></select>
-    </div>
-    <div id="customProfileWrap" style="display:none;margin-top:.6rem;">
-      <textarea id="customProfileInput" style="width:100%;min-height:120px;background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:'JetBrains Mono',monospace;font-size:.76rem;padding:.7rem" data-i18n-placeholder="customJsonPlaceholder" placeholder=""></textarea>
-      <div style="font-size:.75rem;color:var(--text-dim);margin-top:.2rem" data-i18n="customProfileHint">El perfil personalizado sobreescribe solo los umbrales activos.</div>
-    </div>
-    <div style="display:flex;justify-content:center;margin-top:.5rem;">
-      <label style="font-size:.8rem;color:var(--text-dim);display:flex;gap:.4rem;align-items:center;">
-        <input type="checkbox" id="includeAnalystNoise"> <span data-i18n="includeAnalystNoise">Incluir ruido de analistas en el resumen</span>
-      </label>
-    </div>
-    <div style="display:flex;justify-content:center">
-      <button class="btn-analyze" onclick="analyzeData()" data-i18n="analyze">Analizar Financieros</button>
-    </div>
-    <div id="error-msg"></div>
-  </div>
-</div>
-<div id="dashboard"></div>
-<script src="./locales.js"></script>
-<script src="./industry-data.js"></script>
-<script src="./scripts.js"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fundamental Analyzer</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,500;0,9..40,700&family=JetBrains+Mono:wght@400;600&family=Playfair+Display:wght@700;900&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/app/main.tsx"></script>
+  </body>
 </html>
