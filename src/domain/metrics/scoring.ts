@@ -792,6 +792,67 @@ function parseCsvFinancialInput(lines, data) {
   return true;
 }
 
+function detectSectionFromMarkdownHeader(rawLabel) {
+  const normalized = normalizeLabelText(rawLabel).toLowerCase();
+  if (
+    normalized.includes('income statement') ||
+    normalized.includes('cuenta de resultados')
+  )
+    return 'Income Statement';
+  if (
+    normalized.includes('balance sheet') ||
+    normalized.includes('balance general') ||
+    normalized.includes('estado de situación')
+  )
+    return 'Balance Sheet';
+  if (
+    normalized.includes('cash flow') ||
+    normalized.includes('flujo de caja')
+  )
+    return 'Cash Flow';
+  if (normalized.includes('ratios') || normalized.includes('ratio'))
+    return 'Ratios';
+  return null;
+}
+
+function parseMarkdownSectionRows(rows) {
+  const parsed = [];
+  let dates = [];
+  for (const row of rows) {
+    const cells = splitMarkdownRow(row);
+    if (cells.length < 2) continue;
+    if (cells[0] === '---' || cells.every((c) => c === '---' || c === ''))
+      continue;
+    const rawLabel = normalizeLabelText(cells[0]);
+    if (
+      (rawLabel.includes('TIKR') ||
+        rawLabel.includes('Cuenta') ||
+        rawLabel.includes('Balance') ||
+        rawLabel.includes('Cash Flow') ||
+        rawLabel.includes('Ratios') ||
+        rawLabel.includes('Múltiplos') ||
+        rawLabel.includes('Objetivos') ||
+        rawLabel.includes('Estimaciones')) &&
+      cells.some((c) => c.match(/\d{2}\/\d{2}\/\d{2}/))
+    ) {
+      dates = cells.slice(1).map((c) => c.replace('TIKR.com', '').trim());
+      continue;
+    }
+    if (rawLabel === 'TIKR.com' || rawLabel === '---') continue;
+    const cLabel = canonicalizeFinancialLabel(rawLabel);
+    const values = cells.slice(1);
+    parsed.push({
+      label: cLabel.canonicalEn,
+      rawLabel,
+      displayLabel: cLabel.es,
+      labelNormalized: cLabel.normalized,
+      values,
+      dates
+    });
+  }
+  return { dates, rows: parsed };
+}
+
 export function parseTIKR(raw) {
   const lines = raw
     .split('\n')
@@ -882,41 +943,40 @@ export function parseTIKR(raw) {
   }
 
   for (const [secName, rows] of Object.entries(sectionLines)) {
-    const parsed = [];
-    let dates = [];
-    for (const row of rows) {
+    data.sections[secName] = parseMarkdownSectionRows(rows);
+  }
+
+  // Fallback: parse standalone markdown tables even without explicit section headings.
+  if (!Object.keys(data.sections).length) {
+    const markdownRows = lines.filter((l) => l.startsWith('|'));
+    const blocks = [];
+    let currentBlock = [];
+
+    for (const row of markdownRows) {
       const cells = splitMarkdownRow(row);
-      if (cells.length < 2) continue;
-      if (cells[0] === '---' || cells.every((c) => c === '---' || c === ''))
-        continue;
-      const rawLabel = normalizeLabelText(cells[0]);
-      if (
-        (rawLabel.includes('TIKR') ||
-          rawLabel.includes('Cuenta') ||
-          rawLabel.includes('Balance') ||
-          rawLabel.includes('Cash Flow') ||
-          rawLabel.includes('Ratios') ||
-          rawLabel.includes('Múltiplos') ||
-          rawLabel.includes('Objetivos') ||
-          rawLabel.includes('Estimaciones')) &&
-        cells.some((c) => c.match(/\d{2}\/\d{2}\/\d{2}/))
-      ) {
-        dates = cells.slice(1).map((c) => c.replace('TIKR.com', '').trim());
+      if (!cells.length) continue;
+
+      const isTitleRow =
+        detectSectionFromMarkdownHeader(cells[0]) &&
+        cells.some((c) => c.match(/\d{2}\/\d{2}\/\d{2}/));
+
+      if (isTitleRow && currentBlock.length) {
+        blocks.push(currentBlock);
+        currentBlock = [row];
         continue;
       }
-      if (rawLabel === 'TIKR.com' || rawLabel === '---') continue;
-      const cLabel = canonicalizeFinancialLabel(rawLabel);
-      const values = cells.slice(1);
-      parsed.push({
-        label: cLabel.canonicalEn,
-        rawLabel,
-        displayLabel: cLabel.es,
-        labelNormalized: cLabel.normalized,
-        values,
-        dates
-      });
+
+      currentBlock.push(row);
     }
-    data.sections[secName] = { dates, rows: parsed };
+
+    if (currentBlock.length) blocks.push(currentBlock);
+
+    for (const block of blocks) {
+      const firstCells = splitMarkdownRow(block[0] || '');
+      const sectionHint = detectSectionFromMarkdownHeader(firstCells[0] || '');
+      if (!sectionHint) continue;
+      data.sections[sectionHint] = parseMarkdownSectionRows(block);
+    }
   }
   return data;
 }
