@@ -54,18 +54,17 @@ describe('costco large pasted input', () => {
 
     const parsed = parseInput(input);
 
-    const runAnalysisCompat = runAnalysis as unknown as (
-      ...args: unknown[]
-    ) => unknown;
+    const runAnalysisCompat = runAnalysis as unknown as {
+      (...args: unknown[]): unknown;
+      length: number;
+    };
 
-    let results: unknown;
-    try {
-      results = runAnalysisCompat(parsed, 'default', {
-        includeAnalystNoise: false
-      });
-    } catch {
-      results = runAnalysisCompat(parsed, { industryCode: '255030' });
-    }
+    const results =
+      runAnalysisCompat.length >= 3
+        ? runAnalysisCompat(parsed, 'default', {
+            includeAnalystNoise: false
+          })
+        : runAnalysisCompat(parsed, { industryCode: '255030' });
 
     expect(parsed.ticker).toBe('COST');
     expect(Object.keys(parsed.sections ?? {}).length).toBeGreaterThanOrEqual(6);
