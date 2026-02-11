@@ -4297,7 +4297,7 @@ export function analyze(data, profile = 'default', options = {}) {
     };
     const formatUseLine = (label, amount) => {
       const pct = toPctOfFcf(amount);
-      return `${label} ${amount.toFixed(0)}${pct === null ? '' : ` (${pct.toFixed(1)}% of FCF)`}`;
+      return `${label} ${amount.toFixed(0)}${pct === null ? '' : ` (${pct.toFixed(1)}%)`}`;
     };
 
     truthItems.push(
