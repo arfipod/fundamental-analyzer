@@ -85,3 +85,11 @@ npm run test
 - [ ] Section collapse/expand and “open/close all” work.
 - [ ] Industry selector changes profile panel output.
 - [ ] `fundamental-analyzer.html` redirects correctly.
+
+
+## 11) Environment/network troubleshooting
+- If `npm install` fails with `E403` or `ENETUNREACH`, verify your npm proxy and registry settings:
+  - `npm config get registry` should normally be `https://registry.npmjs.org/`.
+  - Check environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `npm_config_http_proxy`, `npm_config_https_proxy`).
+- In restricted corporate/CI networks, you may need an internal npm mirror/allowlist for scoped packages (e.g. `@eslint/*`, `@types/*`).
+- When dependencies are unavailable, run static review checks and retry in a network-enabled CI runner.
