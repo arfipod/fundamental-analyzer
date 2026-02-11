@@ -1361,6 +1361,381 @@ function deriveScoreRule(name, detail, signalText, explanation) {
   return explanation || detail || signalText || '';
 }
 
+function simplifyScoreRule(scoreRule = '') {
+  const rule = String(scoreRule || '').trim();
+  if (!rule) return '';
+
+  if (rule.startsWith('{') && rule.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(rule);
+      const direction = parsed.direction === 'lower' ? 'lower' : 'higher';
+      const neutralText =
+        typeof parsed.neutral === 'string' ? parsed.neutral : 'neutral threshold';
+      const bullText =
+        typeof parsed.bull === 'string' ? parsed.bull : 'bull threshold';
+      return direction === 'higher'
+        ? `higher is better; below ${neutralText} is weak, above ${bullText} is strong`
+        : `lower is better; above ${neutralText} is weak, below ${bullText} is strong`;
+    } catch {
+      return rule;
+    }
+  }
+
+  return rule
+    .replace(/\s+/g, ' ')
+    .replace(/latest/g, 'latest value')
+    .replace(/cagr/g, 'CAGR')
+    .replace(/trend===/g, 'trend = ')
+    .trim();
+}
+
+const METRIC_INTERPRETATION_LIBRARY = [
+  {
+    pattern:
+      /(revenue growth|yoy|cagr|eps growth|ebitda growth|operating income growth|net income growth|fcf growth|consensus (revenue|eps|ebitda|fcf))/i,
+    en: {
+      definition:
+        'Measures business expansion; combine absolute growth with per-share growth and volatility.',
+      lookFor:
+        'Prefer steady growth with stable/improving margins, not one-off spikes.',
+      thresholds:
+        'General guide: <5% weak, 5-10% acceptable, 10-15% good, >15% strong (context/sector dependent).',
+      pitfalls:
+        'M&A, buybacks, tax effects and base effects can overstate core growth quality.',
+      nextQuestions:
+        'How much is price vs volume vs mix? Organic vs acquired?'
+    },
+    es: {
+      definition:
+        'Mide expansión del negocio; combina crecimiento absoluto, por acción y volatilidad.',
+      lookFor:
+        'Mejor crecimiento estable con márgenes defendidos/crecientes, no picos puntuales.',
+      thresholds:
+        'Guía general: <5% débil, 5-10% aceptable, 10-15% bueno, >15% fuerte (según sector).',
+      pitfalls:
+        'M&A, recompras, impuestos y efecto base pueden inflar el crecimiento “core”.',
+      nextQuestions:
+        '¿Cuánto viene de precio, volumen o mix? ¿Orgánico vs adquirido?'
+    }
+  },
+  {
+    pattern: /(gross margin|ebit margin|operating margin|ebitda margin|fcf margin)/i,
+    en: {
+      definition:
+        'Shows pricing power and operating discipline converted into profitability.',
+      lookFor:
+        'Level + trend + stability; stable mid-level can be better than volatile high margins.',
+      thresholds:
+        'Compare with peers/history; persistent expansion is positive, sustained compression is a warning.',
+      pitfalls:
+        'Temporary cuts in R&D/marketing may boost margins now but hurt long-term moat.',
+      nextQuestions:
+        'Is margin change driven by mix, pricing, or temporary cost actions?'
+    },
+    es: {
+      definition:
+        'Refleja poder de precios y disciplina operativa convertidos en rentabilidad.',
+      lookFor:
+        'Nivel + tendencia + estabilidad; margen medio estable puede ser mejor que uno alto volátil.',
+      thresholds:
+        'Comparar con peers/historia; expansión sostenida es positiva, compresión sostenida alerta.',
+      pitfalls:
+        'Recortar I+D/marketing puede inflar margen hoy y debilitar el foso mañana.',
+      nextQuestions:
+        '¿El cambio viene de mix, pricing o recortes temporales?'
+    }
+  },
+  {
+    pattern: /(cogs|opex|sga|r&d|tax rate|interest .*%|stock-based|sbc)/i,
+    en: {
+      definition:
+        'Tracks cost structure quality and whether scale improves unit economics.',
+      lookFor:
+        'For most cost ratios lower is better, except R&D where too low can underinvest future growth.',
+      thresholds:
+        'Evaluate trend and peer percentile rather than one static threshold.',
+      pitfalls:
+        'Accounting policy changes (capitalized costs, classification changes) can distort comparability.',
+      nextQuestions:
+        'Are costs structurally improving or temporarily deferred/capitalized?'
+    },
+    es: {
+      definition:
+        'Mide la calidad de la estructura de costes y si la escala mejora la economía unitaria.',
+      lookFor:
+        'En la mayoría de ratios de coste, bajar es mejor; en I+D, demasiado bajo puede ser mala señal.',
+      thresholds:
+        'Usar tendencia y percentil frente a peers más que un umbral fijo.',
+      pitfalls:
+        'Cambios contables (capitalización/reclasificación) pueden distorsionar comparaciones.',
+      nextQuestions:
+        '¿Mejora estructural real o costes diferidos/capitalizados?'
+    }
+  },
+  {
+    pattern: /(roe|roa|roic|equity multiplier)/i,
+    en: {
+      definition:
+        'Measures return efficiency on shareholder capital and assets.',
+      lookFor:
+        'High returns are best when leverage is moderate and consistency is strong.',
+      thresholds:
+        'ROIC above cost of capital creates value; very high ROE with high leverage needs caution.',
+      pitfalls:
+        'Low/negative equity can mechanically inflate ROE without better economics.',
+      nextQuestions:
+        'How much return comes from true profitability vs leverage?'
+    },
+    es: {
+      definition:
+        'Mide eficiencia de retorno sobre capital del accionista y activos.',
+      lookFor:
+        'Retornos altos son mejores con apalancamiento moderado y consistencia.',
+      thresholds:
+        'ROIC por encima del coste de capital crea valor; ROE muy alto con alta deuda exige cautela.',
+      pitfalls:
+        'Equity bajo/negativo puede inflar ROE sin mejora económica real.',
+      nextQuestions:
+        '¿Cuánto del retorno viene de rentabilidad real vs apalancamiento?'
+    }
+  },
+  {
+    pattern:
+      /(cash .*assets|receivable|dso|inventory|goodwill|intangibles|retained earnings|total equity|working capital)/i,
+    en: {
+      definition:
+        'Describes balance-sheet composition, quality, and resilience under stress.',
+      lookFor:
+        'Receivables/inventory days should be stable; interpret negative working capital with CCC and business model.',
+      thresholds:
+        'No universal target: compare trend against peers and cycle phase.',
+      pitfalls:
+        'Negative retained earnings can come from heavy buybacks/dividends, not only historical losses.',
+      nextQuestions:
+        'Is balance strength improving, or funding growth with supplier/customer float?'
+    },
+    es: {
+      definition:
+        'Describe composición, calidad y resiliencia del balance ante estrés.',
+      lookFor:
+        'Días de cobro/inventario deberían ser estables; capital circulante negativo se interpreta con CCC.',
+      thresholds:
+        'No hay objetivo universal: comparar tendencia, peers y fase del ciclo.',
+      pitfalls:
+        'Beneficios retenidos negativos pueden venir de recompras/dividendos, no solo de pérdidas históricas.',
+      nextQuestions:
+        '¿El balance mejora o el crecimiento se financia con float de proveedores/clientes?'
+    }
+  },
+  {
+    pattern:
+      /(debt|liabilit|current ratio|quick ratio|interest coverage|ffo|net debt|deleverag|leverage|capital)/i,
+    en: {
+      definition:
+        'Assesses solvency, refinancing risk, and debt-servicing capacity.',
+      lookFor:
+        'Read leverage with interest coverage, maturity profile, and cash position together.',
+      thresholds:
+        'General ranges: Net debt/EBITDA 0-2x healthy, 3-5x stressed; coverage should stay comfortably >3-5x.',
+      pitfalls:
+        'Some models (e.g., negative CCC retailers) tolerate low current ratios better than average firms.',
+      nextQuestions:
+        'Is debt rising to fund productive reinvestment or financial engineering?'
+    },
+    es: {
+      definition:
+        'Evalúa solvencia, riesgo de refinanciación y capacidad de servicio de deuda.',
+      lookFor:
+        'Leer apalancamiento junto con cobertura de intereses, vencimientos y caja.',
+      thresholds:
+        'Rangos generales: Deuda neta/EBITDA 0-2x saludable, 3-5x estresado; cobertura idealmente >3-5x.',
+      pitfalls:
+        'Algunos modelos (ej. retail con CCC negativo) soportan current ratio bajo mejor que otros.',
+      nextQuestions:
+        '¿La deuda sube para reinversión productiva o para ingeniería financiera?'
+    }
+  },
+  {
+    pattern:
+      /(cash from operations|cfo|cash conversion|capex|free cash flow|net change in cash|cash cycle|ccc|asset turnover|fixed assets turnover)/i,
+    en: {
+      definition:
+        'Measures cash quality and operating efficiency beyond accounting earnings.',
+      lookFor:
+        'Best signals are consistent CFO/FCF aligned with revenue and EBIT trends.',
+      thresholds:
+        'CFO/NI above ~1 over time is usually healthy; interpret Capex/CFO by industry intensity.',
+      pitfalls:
+        'Working-capital swings can temporarily inflate or depress FCF.',
+      nextQuestions:
+        'Is cash generation recurring, or mostly timing effects from receivables/payables/inventory?'
+    },
+    es: {
+      definition:
+        'Mide calidad de caja y eficiencia operativa más allá del beneficio contable.',
+      lookFor:
+        'La mejor señal es CFO/FCF consistente y alineado con ingresos y EBIT.',
+      thresholds:
+        'CFO/NI >~1 en el tiempo suele ser saludable; Capex/CFO depende de intensidad del sector.',
+      pitfalls:
+        'El capital circulante puede inflar o deprimir el FCF de forma temporal.',
+      nextQuestions:
+        '¿La generación de caja es recurrente o efecto timing de cobros/pagos/inventario?'
+    }
+  },
+  {
+    pattern:
+      /(ev|market cap|p\/e|price\/sales|price\/book|ev\/ebitda|ev\/ebit|ncav|yield|dividend yield|valuation|multiple)/i,
+    en: {
+      definition:
+        'Prices the business versus earnings, cash flow, assets, or sales.',
+      lookFor:
+        'Use valuation with growth durability, margins, and balance-sheet risk—not in isolation.',
+      thresholds:
+        'Ranges are regime- and sector-dependent; compare to own history and close peers.',
+      pitfalls:
+        'If EV/market cap are zero/contradictory, treat as data mapping issue and validate inputs.',
+      nextQuestions:
+        'What growth and margin assumptions are implied by today\'s multiple?'
+    },
+    es: {
+      definition:
+        'Valora el negocio frente a beneficios, caja, activos o ventas.',
+      lookFor:
+        'Usar valoración junto con durabilidad del crecimiento, márgenes y riesgo de balance.',
+      thresholds:
+        'Los rangos dependen del sector/régimen; comparar con su historia y peers cercanos.',
+      pitfalls:
+        'Si EV/market cap salen en cero o contradictorios, tratarlo como posible bug de datos.',
+      nextQuestions:
+        '¿Qué supuestos de crecimiento y margen está descontando el múltiplo actual?'
+    }
+  },
+  {
+    pattern:
+      /(dividend|payout|buyback|shares outstanding|shareholder return|tsr|capital return)/i,
+    en: {
+      definition:
+        'Tracks how cash is returned to shareholders and whether return policy is sustainable.',
+      lookFor:
+        'Prefer returns funded by recurring FCF, not debt spikes.',
+      thresholds:
+        'Very high payout (>~80%) can reduce resilience unless cash flow is ultra-stable.',
+      pitfalls:
+        'Buybacks create value only if done at sensible prices and not offset by high SBC dilution.',
+      nextQuestions:
+        'Is per-share value compounding after netting SBC and debt-funded buybacks?'
+    },
+    es: {
+      definition:
+        'Mide cómo se devuelve caja al accionista y si esa política es sostenible.',
+      lookFor:
+        'Mejor retornos financiados con FCF recurrente, no con picos de deuda.',
+      thresholds:
+        'Payout muy alto (>~80%) reduce resiliencia salvo caja extremadamente estable.',
+      pitfalls:
+        'Recompras crean valor solo si se hacen a precios razonables y sin dilución neta por SBC.',
+      nextQuestions:
+        '¿Compone el valor por acción tras ajustar SBC y recompras financiadas con deuda?'
+    }
+  },
+  {
+    pattern: /(harmony|accrual|consistency|red flag|sanity|reality check)/i,
+    en: {
+      definition:
+        'Cross-check layer: verifies whether growth, earnings, and cash tell the same story.',
+      lookFor:
+        'Prefer aligned trends across revenue, EBIT/NI, and CFO/FCF.',
+      thresholds:
+        'No hard threshold; repeated divergences require deeper forensic review.',
+      pitfalls:
+        'One-year mismatches can be normal, but persistent gaps often signal quality risk.',
+      nextQuestions:
+        'What single assumption would reconcile accounting profit with cash outcomes?'
+    },
+    es: {
+      definition:
+        'Capa de contraste: verifica si crecimiento, beneficios y caja cuentan la misma historia.',
+      lookFor:
+        'Preferible ver tendencias alineadas en ingresos, EBIT/NI y CFO/FCF.',
+      thresholds:
+        'Sin umbral fijo; divergencias repetidas requieren análisis forense.',
+      pitfalls:
+        'Un año aislado puede ser normal, pero brechas persistentes elevan riesgo de calidad.',
+      nextQuestions:
+        '¿Qué supuesto reconcilia mejor el beneficio contable con la caja real?'
+    }
+  }
+];
+
+function metricLibraryEntry(name = '') {
+  const label = String(name || '');
+  return (
+    METRIC_INTERPRETATION_LIBRARY.find((entry) => entry.pattern.test(label)) ||
+    null
+  );
+}
+
+function buildMetricInterpretation(name, scoreRule, signal, signalText) {
+  const shortRule = simplifyScoreRule(scoreRule);
+  const sanityHint =
+    currentLang === 'es'
+      ? 'Chequeo de consistencia: si ves EV/Market Cap = 0, TSR extremo o métricas contradictorias (p.ej. net cash y net debt positivos a la vez), revisar extracción/unidades.'
+      : 'Consistency check: if EV/Market Cap = 0, TSR is extreme, or metrics conflict (e.g., net cash and positive net debt simultaneously), review extraction/units.';
+
+  const positiveBias =
+    signal === 'bull'
+      ? currentLang === 'es'
+        ? 'Lectura actual favorable.'
+        : 'Current read is favorable.'
+      : signal === 'bear'
+        ? currentLang === 'es'
+          ? 'Lectura actual débil; vigilar deterioro.'
+          : 'Current read is weak; monitor deterioration.'
+        : currentLang === 'es'
+          ? 'Lectura mixta/neutral en este momento.'
+          : 'Current read is mixed/neutral.';
+
+  const entry = metricLibraryEntry(name);
+  const pack = entry ? (currentLang === 'es' ? entry.es : entry.en) : null;
+
+  const fallbackDirection =
+    signalText &&
+    /(deleverag|deuda|cost|expense|days|dilution|accrual|tax|liquidity low|tight)/i.test(
+      signalText
+    )
+      ? currentLang === 'es'
+        ? 'Suele ser mejor que baje o se mantenga controlada.'
+        : 'Usually better when it declines or stays controlled.'
+      : currentLang === 'es'
+        ? 'Suele ser mejor que suba de forma sostenible y estable.'
+        : 'Usually better when it rises sustainably and steadily.';
+
+  if (pack) {
+    return currentLang === 'es'
+      ? `Interpretación: ${positiveBias}
+• Qué significa: ${pack.definition}
+• Qué mirar: ${pack.lookFor}
+• Rangos guía: ${pack.thresholds}${shortRule ? ` | Regla del modelo: ${shortRule}.` : ''}
+• Trampas habituales: ${pack.pitfalls}
+• Pregunta clave: ${pack.nextQuestions}
+• ${sanityHint}`
+      : `Interpretation: ${positiveBias}
+• What it means: ${pack.definition}
+• What to look for: ${pack.lookFor}
+• Guide ranges: ${pack.thresholds}${shortRule ? ` | Model rule: ${shortRule}.` : ''}
+• Common pitfalls: ${pack.pitfalls}
+• Key question: ${pack.nextQuestions}
+• ${sanityHint}`;
+  }
+
+  return currentLang === 'es'
+    ? `Interpretación: ${positiveBias} ${fallbackDirection}${shortRule ? ` Regla del modelo: ${shortRule}.` : ''}
+• ${sanityHint}`
+    : `Interpretation: ${positiveBias} ${fallbackDirection}${shortRule ? ` Model rule: ${shortRule}.` : ''}
+• ${sanityHint}`;
+}
+
 function makeItem(
   name,
   detail,
@@ -1370,9 +1745,22 @@ function makeItem(
   explanation,
   meta = {}
 ) {
+  const rawScoreRule =
+    meta.scoreRule || deriveScoreRule(name, detail, signalText, explanation);
+  const detailText = detail || '';
+  const interpretation = buildMetricInterpretation(
+    name,
+    rawScoreRule,
+    signal || 'neutral',
+    signalText || ''
+  );
+  const mergedDetail = detailText
+    ? `${detailText}\n${interpretation}`
+    : interpretation;
+
   return {
     name,
-    detail: detail || '',
+    detail: mergedDetail,
     values: vals || [],
     signal: signal || 'neutral',
     signalText: signalText || '',
@@ -1381,8 +1769,7 @@ function makeItem(
     highConfidence: meta.highConfidence !== false,
     confidence: getConfidence(vals || []),
     labels: meta.labels || vals?.labels || [],
-    scoreRule:
-      meta.scoreRule || deriveScoreRule(name, detail, signalText, explanation)
+    scoreRule: rawScoreRule
   };
 }
 

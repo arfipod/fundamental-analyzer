@@ -217,6 +217,65 @@ describe('FCF Uses Summary formatting', () => {
 
 
 describe('analysis regressions for alignment and period handling', () => {
+
+  it('adds interpretation guidance to every generated metric detail', () => {
+    setLanguage('en');
+    const dates = ['2022', '2023', '2024'];
+    const data = {
+      company: 'Acme Corp',
+      sections: {
+        'Income Statement': {
+          dates,
+          rows: [
+            { label: 'Revenue', values: ['100', '120', '145'], dates },
+            { label: 'Gross Profit', values: ['40', '52', '66'], dates },
+            { label: 'Operating Income', values: ['20', '27', '34'], dates },
+            { label: 'Net Income', values: ['15', '21', '28'], dates },
+            { label: 'EBITDA', values: ['24', '30', '37'], dates }
+          ]
+        },
+        'Balance Sheet': {
+          dates,
+          rows: [
+            { label: 'Cash & Equivalents', values: ['15', '17', '20'], dates },
+            { label: 'Total Assets', values: ['200', '220', '250'], dates },
+            { label: 'Total Debt', values: ['60', '58', '55'], dates },
+            { label: 'Total Equity', values: ['70', '80', '95'], dates },
+            { label: 'Current Assets', values: ['80', '88', '96'], dates },
+            { label: 'Current Liabilities', values: ['55', '58', '60'], dates }
+          ]
+        },
+        'Cash Flow': {
+          dates,
+          rows: [
+            { label: 'Cash from Operations', values: ['18', '23', '30'], dates },
+            { label: 'Capex', values: ['-4', '-5', '-6'], dates },
+            { label: 'Free Cash Flow', values: ['14', '18', '24'], dates }
+          ]
+        },
+        Ratios: { dates, rows: [] },
+        'Valuation Multiples': { dates, rows: [] },
+        'Consensus Estimates': { dates, rows: [] }
+      }
+    };
+
+    const results = analyze(data, 'default', {
+      includeAnalystNoise: false
+    }) as { sections: ResultSection[] };
+
+    const metricItems = results.sections.flatMap((section) => section.items || []);
+    expect(metricItems.length).toBeGreaterThan(0);
+    metricItems.forEach((item) => {
+      expect(item.detail || '').toContain('Interpretation:');
+    });
+
+    const enrichedItem = metricItems.find((item) =>
+      (item.detail || '').includes('What it means:')
+    );
+    expect(enrichedItem).toBeTruthy();
+    expect(enrichedItem?.detail || '').toContain('Guide ranges:');
+    expect(enrichedItem?.detail || '').toContain('Common pitfalls:');
+  });
   it('aligns cross-row ratios by date instead of index when periods are missing', () => {
     setLanguage('en');
     const dates = ['2020', '2021', '2022', '2023'];
