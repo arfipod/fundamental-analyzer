@@ -58,6 +58,7 @@ describe('renderDashboard trend bars', () => {
     expect(missingBarCount).toBe(1);
     expect(html).toContain('2021: 12.00');
     expect(html).toContain('2023: 20.00');
+    expect(html).not.toContain('data-i18n-point');
   });
 
   it('fills gaps with missing bars when labels include periods without values', () => {
@@ -72,6 +73,7 @@ describe('renderDashboard trend bars', () => {
     expect(totalBars).toBe(3);
     expect(missingBarCount).toBe(2);
     expect(html).toContain('2021: 15.00');
+    expect(html).toContain('aria-label="2021: 15.00"');
   });
   it('uses full period metadata when available to keep missing temporal gaps', () => {
     const values = [10, 20] as number[] & {
@@ -95,6 +97,29 @@ describe('renderDashboard trend bars', () => {
     expect(html).toContain('2023: 20.00');
   });
 
+
+
+  it('exposes period and value in native tooltip attributes for each rendered bar', () => {
+    const html = renderDashboard(
+      { company: 'Acme Corp' },
+      makeResults({ values: [12.5, 15], labels: ['31/12/23', '31/12/24'] })
+    );
+
+    document.body.innerHTML = html;
+
+    const bars = Array.from(document.querySelectorAll('.trend-bar .bar'));
+    expect(bars).toHaveLength(2);
+
+    bars.forEach((bar) => {
+      const title = bar.getAttribute('title');
+      const ariaLabel = bar.getAttribute('aria-label');
+      expect(title).toBeTruthy();
+      expect(title).toMatch(/^.+: -?\d+\.\d{2}$/);
+      expect(ariaLabel).toBe(title);
+    });
+
+    expect(document.body.textContent).not.toContain('Sin datos');
+  });
 
   it('keeps operating leverage trend bars when intermediate periods are missing', () => {
     setLanguage('en');

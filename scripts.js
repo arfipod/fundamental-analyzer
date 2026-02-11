@@ -4230,11 +4230,11 @@ function renderTrendBars(values, labels = []) {
       const cls = v > 0 ? 'bar-pos' : v < 0 ? 'bar-neg' : 'bar-zero';
       const year = labels[i] || `#${i + 1}`;
       const label = `${year}: ${v.toFixed(2)}`;
-      return `<button type="button" class="bar ${cls}" style="height:${h}px" title="${label}" data-point="${label}" onclick="showBarPoint(this)"></button>`;
+      return `<button type="button" class="bar ${cls}" style="height:${h}px" title="${label}" aria-label="${label}" data-point="${label}"></button>`;
     })
     .join(
       ''
-    )}</div><div class="bar-point-view mono" data-i18n-point>${t('barNoData', 'No data')}</div>`;
+    )}</div>`;
 }
 
 function renderDashboard(data, results, industrySelection = null) {
@@ -4370,12 +4370,6 @@ function renderDashboard(data, results, industrySelection = null) {
   html += `</div><div class="dashboard-panel" data-panel="industry" style="display:none">${buildIndustryPanel(data, results, industrySelection)}</div>`;
   d.innerHTML = html;
   updateToggleSectionsButton();
-}
-
-function showBarPoint(el) {
-  const value = el?.dataset?.point || t('barNoData', 'No data');
-  const container = el.closest('.a-item')?.querySelector('[data-i18n-point]');
-  if (container) container.textContent = value;
 }
 
 function updateToggleSectionsButton() {
