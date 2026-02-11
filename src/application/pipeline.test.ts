@@ -62,6 +62,37 @@ describe('analysis pipeline', () => {
     expect(results.sections?.length).toBeGreaterThan(0);
   });
 
+
+  it('adds special-case balance and data-quality commentary in metric details', async () => {
+    const { parseInput } = await import('./parse');
+    const { runAnalysis } = await import('./analyze');
+
+    const fixture = fs.readFileSync(
+      path.resolve(process.cwd(), 'test-data/apple.md'),
+      'utf8'
+    );
+
+    const parsed = parseInput(fixture) as ParsedInput;
+    const results = runAnalysis(parsed, 'default', {
+      includeAnalystNoise: false
+    });
+
+    const allItems = (results.sections || []).flatMap((section) => section.items || []);
+
+    const retained = allItems.find((item) => item.name === 'Retained Earnings');
+    expect(retained?.detail || '').toMatch(/recompras\/dividendos|buybacks\/dividends/i);
+
+    const wcTurnover = allItems.find((item) => item.name === 'Working Capital Turnover');
+    expect(wcTurnover?.detail || '').toMatch(/CCC|supplier-float|float/i);
+
+    const evVsMc = allItems.find(
+      (item) => item.name === 'Enterprise Value vs Market Cap'
+    );
+    expect(evVsMc?.detail || '').toMatch(/inconsistente|inconsistent valuation datapoint/i);
+
+    const netDebtNetCash = allItems.find((item) => item.name === 'Net Debt / Net Cash');
+    expect(netDebtNetCash?.detail || '').toMatch(/definición consistente de caja|consistent cash definition/i);
+  });
   it('parses english CSV financial exports and maps them to a statement section', async () => {
     const { parseInput } = await import('./parse');
 

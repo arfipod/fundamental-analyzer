@@ -1501,7 +1501,7 @@ const METRIC_INTERPRETATION_LIBRARY = [
   },
   {
     pattern:
-      /(cash .*assets|receivable|dso|inventory|goodwill|intangibles|retained earnings|total equity|working capital)/i,
+      /(cash .*assets|receivable|dso|inventory|inventory yoy|goodwill|intangibles|retained earnings|total equity|working capital|deferred revenue)/i,
     en: {
       definition:
         'Describes balance-sheet composition, quality, and resilience under stress.',
@@ -1529,7 +1529,7 @@ const METRIC_INTERPRETATION_LIBRARY = [
   },
   {
     pattern:
-      /(debt|liabilit|current ratio|quick ratio|interest coverage|ffo|net debt|deleverag|leverage|capital)/i,
+      /(debt|liabilit|current ratio|quick ratio|interest coverage|ffo|net debt|net cash|cash \/ short-term debt|deleverag|leverage|capital)/i,
     en: {
       definition:
         'Assesses solvency, refinancing risk, and debt-servicing capacity.',
@@ -1557,7 +1557,7 @@ const METRIC_INTERPRETATION_LIBRARY = [
   },
   {
     pattern:
-      /(cash from operations|cfo|cash conversion|capex|free cash flow|net change in cash|cash cycle|ccc|asset turnover|fixed assets turnover)/i,
+      /(cash from operations|cfo|cash conversion|capex|free cash flow|fcf uses summary|sbc as % of fcf|sbc as % of net income|net change in cash|cash cycle|ccc|asset turnover|fixed assets turnover)/i,
     en: {
       definition:
         'Measures cash quality and operating efficiency beyond accounting earnings.',
@@ -1613,7 +1613,7 @@ const METRIC_INTERPRETATION_LIBRARY = [
   },
   {
     pattern:
-      /(dividend|payout|buyback|shares outstanding|shareholder return|tsr|capital return)/i,
+      /(dividend|payout|buyback|shares outstanding|total shareholder return|shareholder return|tsr|capital return)/i,
     en: {
       definition:
         'Tracks how cash is returned to shareholders and whether return policy is sustainable.',
@@ -1676,8 +1676,16 @@ function metricLibraryEntry(name = '') {
   );
 }
 
-function buildMetricInterpretation(name, scoreRule, signal, signalText) {
+function buildMetricInterpretation(
+  name,
+  scoreRule,
+  signal,
+  signalText,
+  detailText = '',
+  explanationText = ''
+) {
   const shortRule = simplifyScoreRule(scoreRule);
+  const combinedContext = `${detailText} ${explanationText} ${signalText}`.toLowerCase();
   const sanityHint =
     currentLang === 'es'
       ? 'Chequeo de consistencia: si ves EV/Market Cap = 0, TSR extremo o métricas contradictorias (p.ej. net cash y net debt positivos a la vez), revisar extracción/unidades.'
@@ -1711,6 +1719,69 @@ function buildMetricInterpretation(name, scoreRule, signal, signalText) {
         ? 'Suele ser mejor que suba de forma sostenible y estable.'
         : 'Usually better when it rises sustainably and steadily.';
 
+  const specialHints = [];
+  const metricName = String(name || '').toLowerCase();
+
+  if (metricName.includes('retained earnings')) {
+    specialHints.push(
+      currentLang === 'es'
+        ? 'Caso especial: beneficios retenidos negativos no siempre implican pérdidas históricas; también pueden reflejar recompras/dividendos acumulados.'
+        : 'Special case: negative retained earnings do not always imply historical losses; they can also reflect cumulative buybacks/dividends.'
+    );
+  }
+
+  if (metricName.includes('working capital turnover') && /latest:\s*-/.test(combinedContext)) {
+    specialHints.push(
+      currentLang === 'es'
+        ? 'Caso especial: working capital turnover negativo debe leerse junto con CCC; puede indicar fortaleza por financiación de proveedores (float).'
+        : 'Special case: negative working-capital turnover should be read with CCC; it can indicate supplier-float strength instead of weakness.'
+    );
+  }
+
+  if ((metricName.includes('roe') || metricName.includes('return on equity')) && /(leverage|apalancamiento|multiplier|inflated roe)/.test(combinedContext)) {
+    specialHints.push(
+      currentLang === 'es'
+        ? 'Caso especial: ROE muy alto puede estar inflado por apalancamiento/equity reducido; validar ROA y multiplicador de patrimonio.'
+        : 'Special case: very high ROE can be leverage-inflated by small equity; validate ROA and the equity multiplier.'
+    );
+  }
+
+  if (metricName.includes('enterprise value vs market cap') && /\$0\.0b|\b0\.0b\b|\b0\b/.test(combinedContext)) {
+    specialHints.push(
+      currentLang === 'es'
+        ? '⚠️ Dato de valoración inconsistente: EV o Market Cap en cero sugiere fallo de extracción/mapeo/unidades.'
+        : '⚠️ Inconsistent valuation datapoint: EV or Market Cap at zero suggests extraction/mapping/unit issues.'
+    );
+  }
+
+  if (metricName.includes('net debt / net cash')) {
+    specialHints.push(
+      currentLang === 'es'
+        ? 'Chequeo: usar definición consistente de caja (incluyendo o no inversiones a corto plazo) para evitar contradicciones entre secciones.'
+        : 'Check: use a consistent cash definition (including or excluding short-term investments) to avoid cross-section contradictions.'
+    );
+  }
+
+  if (metricName.includes('cash / short-term debt')) {
+    specialHints.push(
+      currentLang === 'es'
+        ? 'Chequeo: cobertura baja aumenta riesgo de refinanciación inmediata, especialmente con crédito más restrictivo.'
+        : 'Check: low coverage increases near-term refinancing risk, especially in tighter credit markets.'
+    );
+  }
+
+  if (metricName.includes('total shareholder return') && /(\d{4,}|%)/.test(combinedContext)) {
+    specialHints.push(
+      currentLang === 'es'
+        ? 'Sanity check: si el TSR parece imposible, revisar fórmula y unidades (porcentaje vs base monetaria).'
+        : 'Sanity check: if TSR looks implausible, re-check formula and units (percentage vs monetary base).'
+    );
+  }
+
+  const specialText = specialHints.length
+    ? `\n• ${specialHints.join('\n• ')}`
+    : '';
+
   if (pack) {
     return currentLang === 'es'
       ? `Interpretación: ${positiveBias}
@@ -1719,21 +1790,21 @@ function buildMetricInterpretation(name, scoreRule, signal, signalText) {
 • Rangos guía: ${pack.thresholds}${shortRule ? ` | Regla del modelo: ${shortRule}.` : ''}
 • Trampas habituales: ${pack.pitfalls}
 • Pregunta clave: ${pack.nextQuestions}
-• ${sanityHint}`
+• ${sanityHint}${specialText}`
       : `Interpretation: ${positiveBias}
 • What it means: ${pack.definition}
 • What to look for: ${pack.lookFor}
 • Guide ranges: ${pack.thresholds}${shortRule ? ` | Model rule: ${shortRule}.` : ''}
 • Common pitfalls: ${pack.pitfalls}
 • Key question: ${pack.nextQuestions}
-• ${sanityHint}`;
+• ${sanityHint}${specialText}`;
   }
 
   return currentLang === 'es'
     ? `Interpretación: ${positiveBias} ${fallbackDirection}${shortRule ? ` Regla del modelo: ${shortRule}.` : ''}
-• ${sanityHint}`
+• ${sanityHint}${specialText}`
     : `Interpretation: ${positiveBias} ${fallbackDirection}${shortRule ? ` Model rule: ${shortRule}.` : ''}
-• ${sanityHint}`;
+• ${sanityHint}${specialText}`;
 }
 
 function makeItem(
@@ -1752,7 +1823,9 @@ function makeItem(
     name,
     rawScoreRule,
     signal || 'neutral',
-    signalText || ''
+    signalText || '',
+    detailText,
+    explanation || ''
   );
   const mergedDetail = detailText
     ? `${detailText}\n${interpretation}`
