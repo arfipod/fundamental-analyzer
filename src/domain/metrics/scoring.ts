@@ -600,6 +600,198 @@ function splitMarkdownRow(row) {
   // remove leading/trailing empty cell due to leading/trailing pipe
   return cells.filter((c, i) => i > 0 && i < cells.length - 1);
 }
+
+function splitDelimitedRow(row, delimiter) {
+  const cells = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < row.length; i++) {
+    const ch = row[i];
+    if (ch === '"') {
+      if (inQuotes && row[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (ch === delimiter && !inQuotes) {
+      cells.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
+function detectCsvDelimiter(line) {
+  let commas = 0;
+  let semicolons = 0;
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (!inQuotes && ch === ',') commas++;
+    if (!inQuotes && ch === ';') semicolons++;
+  }
+  return semicolons > commas ? ';' : ',';
+}
+
+function looksLikeFinancialCsv(lines) {
+  if (!lines.length) return false;
+  const first = lines[0] || '';
+  if (!first || first.startsWith('|')) return false;
+  const delimiter = detectCsvDelimiter(first);
+  const cols = splitDelimitedRow(first, delimiter).map((c) =>
+    c.replace(/^"|"$/g, '').trim()
+  );
+  if (cols.length < 3) return false;
+  const firstCol = cols[0].toLowerCase();
+  if (
+    !['date', 'datetime', 'fecha', 'periodo', 'period'].some((k) =>
+      firstCol.includes(k)
+    )
+  )
+    return false;
+  return cols.slice(1).some((c) => c.length > 0);
+}
+
+const SECTION_HINTS = {
+  'Income Statement': [
+    'revenue',
+    'ingresos',
+    'cost of goods sold',
+    'gross profit',
+    'operating income',
+    'ebit',
+    'ebitda',
+    'eps',
+    'tax',
+    'beneficio',
+    'gastos',
+    'marg',
+    'dividend'
+  ],
+  'Balance Sheet': [
+    'asset',
+    'liabil',
+    'equity',
+    'debt',
+    'cash and equivalents',
+    'invent',
+    'receivable',
+    'payable',
+    'activo',
+    'pasivo',
+    'patrimonio',
+    'deuda',
+    'efectivo'
+  ],
+  'Cash Flow': [
+    'cash flow',
+    'operating cash',
+    'capital expenditure',
+    'free cash flow',
+    'stock based compensation',
+    'depreciation',
+    'flujo de caja',
+    'capex',
+    'depreciación'
+  ],
+  Ratios: [
+    'ratio',
+    '% change',
+    'margin',
+    'return on',
+    'payout',
+    'cagr',
+    'margen',
+    'cambio yoy',
+    'yoy'
+  ],
+  'Valuation Multiples': [
+    'market cap',
+    'ev/',
+    'p/e',
+    'price close',
+    'valuation',
+    'capitalización',
+    'precio'
+  ],
+  'Consensus Estimates': ['estimate', 'consensus', 'estimación', 'consenso']
+};
+
+function inferSectionFromHeaders(headers) {
+  const scores = Object.fromEntries(
+    Object.keys(SECTION_HINTS).map((section) => [section, 0])
+  );
+  headers.forEach((h) => {
+    const normalized = normalizeLabelText(h).toLowerCase();
+    Object.entries(SECTION_HINTS).forEach(([section, hints]) => {
+      if (hints.some((hint) => normalized.includes(hint))) scores[section] += 1;
+    });
+  });
+  let bestSection = 'Income Statement';
+  let bestScore = -1;
+  Object.entries(scores).forEach(([section, score]) => {
+    if (score > bestScore) {
+      bestSection = section;
+      bestScore = score;
+    }
+  });
+  return bestSection;
+}
+
+function parseCsvFinancialInput(lines, data) {
+  const delimiter = detectCsvDelimiter(lines[0]);
+  const header = splitDelimitedRow(lines[0], delimiter).map((c) =>
+    c.replace(/^"|"$/g, '').trim()
+  );
+  if (header.length < 2) return false;
+
+  const metricHeaders = header.slice(1);
+  const dates = [];
+  const matrix = [];
+
+  for (const line of lines.slice(1)) {
+    const cells = splitDelimitedRow(line, delimiter).map((c) =>
+      c.replace(/^"|"$/g, '').trim()
+    );
+    if (cells.length < 2) continue;
+    const rowDate = cells[0];
+    if (!rowDate) continue;
+    dates.push(rowDate);
+    matrix.push(cells);
+  }
+
+  if (!dates.length) return false;
+
+  const rows = metricHeaders.map((label, metricIdx) => {
+    const rawLabel = normalizeLabelText(label);
+    const cLabel = canonicalizeFinancialLabel(rawLabel);
+    const values = matrix.map((row) => row[metricIdx + 1] || '');
+    return {
+      label: cLabel.canonicalEn,
+      rawLabel,
+      displayLabel: cLabel.es,
+      labelNormalized: cLabel.normalized,
+      values,
+      dates
+    };
+  });
+
+  const sectionName = inferSectionFromHeaders(metricHeaders);
+  data.sections[sectionName] = { dates, rows };
+  return true;
+}
+
 export function parseTIKR(raw) {
   const lines = raw
     .split('\n')
@@ -615,6 +807,11 @@ export function parseTIKR(raw) {
     sections: {}
   };
   const firstLineRaw = (lines[0] || '').replace(/^#+\s*/, '').trim();
+
+  if (looksLikeFinancialCsv(lines)) {
+    const csvData = parseCsvFinancialInput(lines, data);
+    if (csvData) return data;
+  }
 
   let ticker = '';
   let company = '';
@@ -3672,7 +3869,7 @@ export function analyze(data, profile = 'default', options = {}) {
   const niY = yoyGrowth(niVals).slice(-1)[0];
   const epsY = yoyGrowth(epsVals).slice(-1)[0];
   const earnY = niY ?? epsY;
-  if (revY !== null && earnY !== null) {
+  if (Number.isFinite(revY) && Number.isFinite(earnY)) {
     const bearish = revY > 4 && earnY < -4;
     harmonyItems.push(
       makeItem(
@@ -3882,7 +4079,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (invVals2.length >= 2 && revVals.length >= 2) {
     const invY = yoyGrowth(invVals2).slice(-1)[0];
     const revYY = yoyGrowth(revVals).slice(-1)[0];
-    if (invY !== null && revYY !== null) {
+    if (Number.isFinite(invY) && Number.isFinite(revYY)) {
       const spread = invY - revYY;
       balanceItems.push(
         makeItem(
