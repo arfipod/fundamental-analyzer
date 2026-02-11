@@ -2825,17 +2825,17 @@ function buildSummary(data, results) {
 export function populateIndustrySelector() {
   const sel = document.getElementById('industrySelect');
   if (!sel || !Array.isArray(window.GICS_INDUSTRIES)) return;
-  const autoLabel = currentLang === 'es' ? 'Industria: Auto (sin sesgo)' : 'Industry: Auto (no bias)';
-  const current = sel.value || 'auto';
-  sel.innerHTML = [`<option value="auto">${autoLabel}</option>`]
-    .concat(window.GICS_INDUSTRIES.slice().sort((a, b) => a.code.localeCompare(b.code)).map(i => `<option value="${i.code}">${i.code} · ${i.name}</option>`))
+  const current = sel.value || window.GICS_INDUSTRIES[0]?.code;
+  sel.innerHTML = window.GICS_INDUSTRIES.slice()
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(i => `<option value="${i.code}">${i.name} (${i.code})</option>`)
     .join('');
-  sel.value = current;
+  if (current) sel.value = current;
 }
 
 export function getIndustrySelection() {
-  const code = document.getElementById('industrySelect')?.value || 'auto';
-  if (code === 'auto') return null;
+  const code = document.getElementById('industrySelect')?.value || '';
+  if (!code) return null;
   return window.GICS_INDUSTRIES?.find(i => i.code === code) || null;
 }
 

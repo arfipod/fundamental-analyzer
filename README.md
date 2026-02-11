@@ -50,7 +50,7 @@ npm run test
 2. `parseInput` normalizes tables into internal section rows.
 3. `runAnalysis` computes metric items, signals, grades, and summaries.
 4. Dashboard HTML VM is produced and rendered in the UI.
-5. Industry selection overlays profile-relevant KPIs/valuation hints.
+5. Industry selection overlays industry-relevant KPIs/valuation hints.
 
 ## 7) i18n system
 - Dictionaries live in `src/domain/i18n`.
@@ -64,12 +64,11 @@ npm run test
 - Optionally add typed helper shape in `src/domain/metrics/types.ts`.
 
 ### Add a scoring rule / threshold
-- Add thresholds in scoring profile logic and/or threshold utilities.
-- If custom JSON-compatible, map key in parser and threshold resolver.
+- Add thresholds in industry/profile mapping logic and threshold utilities in the domain layer.
 
 ### Add an industry profile / heuristic
 - Extend `INDUSTRY_PROFILES` and `GICS_INDUSTRIES` in `src/domain/industry/data.ts`.
-- Optional helper usage in `src/domain/industry/heuristics.ts`.
+- Ensure the selected industry code maps to the intended heuristic profile.
 
 ### Add translation key / language
 - Add key in language dictionaries.
@@ -78,7 +77,6 @@ npm run test
 
 ## 9) Troubleshooting
 - **No table parsed**: ensure pasted content contains markdown rows beginning with `|` and includes date headers.
-- **Custom profile error**: ensure JSON is valid object syntax.
 - **Blank dashboard**: run `npm run typecheck` and check browser console for runtime issues.
 
 ## 10) Manual QA checklist
@@ -86,5 +84,4 @@ npm run test
 - [ ] Analyzer accepts a valid TIKR sample and renders dashboard.
 - [ ] Section collapse/expand and “open/close all” work.
 - [ ] Industry selector changes profile panel output.
-- [ ] Custom JSON profile validates and affects thresholds.
 - [ ] `fundamental-analyzer.html` redirects correctly.
