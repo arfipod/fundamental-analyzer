@@ -9,10 +9,7 @@ export default tseslint.config(
   {
     ignores: [
       'dist',
-      'coverage',
-      'src/domain/metrics/scoring.ts',
-      'src/domain/i18n/en.ts',
-      'src/domain/industry/data.ts'
+      'coverage'
     ]
   },
   {

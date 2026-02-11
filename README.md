@@ -61,6 +61,16 @@ npm run typecheck
 npm run build
 ```
 
+
+## Quality gates
+
+Run these before opening a PR:
+
+- `npm run lint`
+- `npm run typecheck`
+- `npm run test`
+- `npm run build`
+
 ## Known limitations / next steps
 
 - Parser currently focuses on markdown table exports and common TIKR labels.

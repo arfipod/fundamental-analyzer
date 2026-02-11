@@ -18,7 +18,7 @@ const SECTION_MAP: Record<string, SectionName> = {
 
 const parseNumber = (raw: string): number | null => {
   const value = raw.trim();
-  if (!value || value === '-' || /^n\/?a$/i.test(value)) return null;
+  if (!value || value === '-' || value === '—' || value === '–' || /^n\/?a$/i.test(value)) return null;
   const negativeByParen = value.startsWith('(') && value.endsWith(')');
   const normalized = value
     .replace(/[,$€£%]/g, '')

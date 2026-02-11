@@ -16,4 +16,12 @@ describe('analyze view-model snapshots', () => {
     const vm = analyze(parseInput(raw), { industryCode: '201060' });
     expect(vm).toMatchSnapshot();
   });
+
+  it('falls back gracefully when industry code is unknown', () => {
+    const raw = fs.readFileSync(path.resolve(process.cwd(), 'test-data/apple.md'), 'utf8');
+    const vm = analyze(parseInput(raw), { industryCode: '999999' });
+    expect(vm.metadata.appliedProfile.length).toBeGreaterThan(0);
+    expect(vm.industryPanel.industryCode).toBe('101010');
+  });
+
 });
