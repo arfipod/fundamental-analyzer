@@ -22,6 +22,7 @@ npm run typecheck
 npm run lint
 npm run format
 npm run test
+npm run test:coverage
 ```
 
 ## 3) Deployment notes (static hosting)
