@@ -3869,7 +3869,7 @@ export function analyze(data, profile = 'default', options = {}) {
   const niY = yoyGrowth(niVals).slice(-1)[0];
   const epsY = yoyGrowth(epsVals).slice(-1)[0];
   const earnY = niY ?? epsY;
-  if (revY !== null && earnY !== null) {
+  if (Number.isFinite(revY) && Number.isFinite(earnY)) {
     const bearish = revY > 4 && earnY < -4;
     harmonyItems.push(
       makeItem(

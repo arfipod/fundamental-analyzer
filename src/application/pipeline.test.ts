@@ -107,4 +107,18 @@ describe('analysis pipeline', () => {
     expect(revenueRow?.values).toEqual(['49954', '52961']);
     expect(taxRateRow?.values).toEqual(['6,8266', '10,8508']);
   });
+
+  it('analyzes balance-sheet-only CSV input without crashing', async () => {
+    const { parseInput } = await import('./parse');
+    const { runAnalysis } = await import('./analyze');
+
+    const csv = `Date,Cash And Equivalents,Total Current Assets,Total Assets,Total Debt,Net Debt\n2006-05-31,6659,11974,29029,5894,-1711\n2025-11-30,19241,34366,204984,131730,111964`;
+
+    const parsed = parseInput(csv) as ParsedInput;
+
+    expect(parsed.sections?.['Balance Sheet']).toBeTruthy();
+    expect(() =>
+      runAnalysis(parsed, 'default', { includeAnalystNoise: false })
+    ).not.toThrow();
+  });
 });
