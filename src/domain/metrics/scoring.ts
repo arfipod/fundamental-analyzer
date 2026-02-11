@@ -224,7 +224,7 @@ function normalizeLabelText(label) {
     const re = new RegExp(wrong, 'gi');
     out = out.replace(re, ok);
   });
-  return out.replace(/\s+/g, ' ').trim();
+  return out.replace(/%\s+\)/g, '%)').replace(/\s+/g, ' ').trim();
 }
 
 const FINANCIAL_LABEL_NORMALIZED = Object.fromEntries(
