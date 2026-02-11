@@ -1,5 +1,7 @@
 // @ts-nocheck
 let currentLang = localStorage.getItem('fundamentalAnalyzerLang') || 'es';
+const langListeners = new Set();
+
 export function getCurrentLang() {
   return currentLang;
 }
@@ -20,12 +22,25 @@ function applyLocalization() {
   document.documentElement.lang = currentLang;
   document.querySelectorAll('[data-i18n]').forEach((el) => {
     const key = el.getAttribute('data-i18n');
-    el.textContent = t(key, el.textContent);
+    if (!el.dataset.i18nDefault) el.dataset.i18nDefault = el.textContent || '';
+    el.textContent = t(key, el.dataset.i18nDefault);
   });
   document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
     const key = el.getAttribute('data-i18n-placeholder');
-    el.placeholder = t(key, el.placeholder || '');
+    if (!el.dataset.i18nPlaceholderDefault)
+      el.dataset.i18nPlaceholderDefault = el.placeholder || '';
+    el.placeholder = t(key, el.dataset.i18nPlaceholderDefault);
   });
+}
+
+function emitLangChange() {
+  for (const cb of langListeners) cb(currentLang);
+}
+
+export function onLanguageChange(cb) {
+  if (typeof cb !== 'function') return () => {};
+  langListeners.add(cb);
+  return () => langListeners.delete(cb);
 }
 
 export function setLanguage(lang) {
@@ -34,8 +49,7 @@ export function setLanguage(lang) {
   applyLocalization();
   const langSel = document.getElementById('langSelect');
   if (langSel) langSel.value = currentLang;
-  populateIndustrySelector();
-  updateToggleSectionsButton();
+  emitLangChange();
 }
 
 const FINANCIAL_LABEL_EN_ES = {
@@ -227,9 +241,16 @@ function normalizeLabelText(label) {
   return out.replace(/%\s+\)/g, '%)').replace(/\s+/g, ' ').trim();
 }
 
-const FINANCIAL_LABEL_NORMALIZED = Object.fromEntries(
+const FINANCIAL_LABEL_NORMALIZED_EN = Object.fromEntries(
   Object.entries(FINANCIAL_LABEL_EN_ES).map(([en, es]) => [
     normalizeLabelText(en).toLowerCase(),
+    { en, es }
+  ])
+);
+
+const FINANCIAL_LABEL_NORMALIZED_ES = Object.fromEntries(
+  Object.entries(FINANCIAL_LABEL_EN_ES).map(([en, es]) => [
+    normalizeLabelText(es).toLowerCase(),
     { en, es }
   ])
 );
@@ -237,14 +258,25 @@ const FINANCIAL_LABEL_NORMALIZED = Object.fromEntries(
 function canonicalizeFinancialLabel(label) {
   const raw = String(label || '');
   const normalized = normalizeLabelText(raw);
-  const exact = FINANCIAL_LABEL_NORMALIZED[normalized.toLowerCase()];
-  if (exact)
+  const key = normalized.toLowerCase();
+  const exactEn = FINANCIAL_LABEL_NORMALIZED_EN[key];
+  if (exactEn)
     return {
       raw,
       normalized,
-      canonicalEn: exact.en,
-      es: exact.es,
-      match: 'exact'
+      canonicalEn: exactEn.en,
+      es: exactEn.es,
+      match: 'exact_en'
+    };
+
+  const exactEs = FINANCIAL_LABEL_NORMALIZED_ES[key];
+  if (exactEs)
+    return {
+      raw,
+      normalized,
+      canonicalEn: exactEs.en,
+      es: exactEs.es,
+      match: 'exact_es'
     };
 
   const syn = FINANCIAL_SYNONYMS[normalized.toLowerCase()];
@@ -516,35 +548,54 @@ const DYNAMIC_I18N = {
   }
 };
 
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const FIN_LABEL_ENTRIES = Object.entries(FINANCIAL_LABEL_EN_ES).sort(
+  (a, b) => b[0].length - a[0].length
+);
+const FIN_LABEL_ENTRIES_REVERSED = FIN_LABEL_ENTRIES.map(([en, es]) => [es, en]);
+const METRIC_ENTRIES = Object.entries(DYNAMIC_I18N.metricNames).sort(
+  (a, b) => b[0].length - a[0].length
+);
+const METRIC_ENTRIES_REVERSED = METRIC_ENTRIES.map(([en, es]) => [es, en]);
+const SECTION_ENTRIES = Object.entries(DYNAMIC_I18N.sectionTitles).sort(
+  (a, b) => b[0].length - a[0].length
+);
+const SECTION_ENTRIES_REVERSED = SECTION_ENTRIES.map(([en, es]) => [es, en]);
+const FRAG_ENTRIES = Object.entries(DYNAMIC_I18N.fragments).sort(
+  (a, b) => b[0].length - a[0].length
+);
+const FRAG_ENTRIES_REVERSED = FRAG_ENTRIES.map(([en, es]) => [es, en]);
+
 function localizeDynamicText(text) {
   if (!text) return text;
   let out = normalizeLabelText(String(text));
 
-  // Financial labels first: exact map, then synonyms, fallback to original.
-  Object.entries(FINANCIAL_LABEL_EN_ES)
-    .sort((a, b) => b[0].length - a[0].length)
-    .forEach(([en, es]) => {
-      const re = new RegExp(en.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
-      out = out.replace(re, currentLang === 'es' ? es : en);
-    });
+  const metricEntries =
+    currentLang === 'es' ? METRIC_ENTRIES : METRIC_ENTRIES_REVERSED;
+  metricEntries.forEach(([from, to]) => {
+    out = out.replaceAll(from, to);
+  });
 
-  if (currentLang !== 'es') return out;
+  const sectionEntries =
+    currentLang === 'es' ? SECTION_ENTRIES : SECTION_ENTRIES_REVERSED;
+  sectionEntries.forEach(([from, to]) => {
+    out = out.replaceAll(from, to);
+  });
 
-  Object.entries(DYNAMIC_I18N.metricNames)
-    .sort((a, b) => b[0].length - a[0].length)
-    .forEach(([en, es]) => {
-      out = out.replaceAll(en, es);
-    });
-  Object.entries(DYNAMIC_I18N.sectionTitles)
-    .sort((a, b) => b[0].length - a[0].length)
-    .forEach(([en, es]) => {
-      out = out.replaceAll(en, es);
-    });
-  Object.entries(DYNAMIC_I18N.fragments)
-    .sort((a, b) => b[0].length - a[0].length)
-    .forEach(([en, es]) => {
-      out = out.replaceAll(en, es);
-    });
+  const fragmentEntries =
+    currentLang === 'es' ? FRAG_ENTRIES : FRAG_ENTRIES_REVERSED;
+  fragmentEntries.forEach(([from, to]) => {
+    out = out.replaceAll(from, to);
+  });
+
+  const financialEntries =
+    currentLang === 'es' ? FIN_LABEL_ENTRIES : FIN_LABEL_ENTRIES_REVERSED;
+  financialEntries.forEach(([from, to]) => {
+    const re = new RegExp(escapeRegExp(from), 'g');
+    out = out.replace(re, to);
+  });
+
   return out;
 }
 
@@ -4825,6 +4876,12 @@ export function populateIndustrySelector() {
     .join('');
   if (current) sel.value = current;
 }
+
+onLanguageChange(() => {
+  if (typeof populateIndustrySelector === 'function') populateIndustrySelector();
+  if (typeof updateToggleSectionsButton === 'function')
+    updateToggleSectionsButton();
+});
 
 export function getIndustrySelection() {
   const code = document.getElementById('industrySelect')?.value || '';
