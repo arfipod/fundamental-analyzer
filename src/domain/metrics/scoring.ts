@@ -552,7 +552,9 @@ function localizeDynamicText(text) {
 // PARSER — Converts TIKR markdown tables to structured data
 // =========================================================
 function parseNumber(s) {
-  if (!s || typeof s !== 'string') return null;
+  if (s === null || s === undefined) return null;
+  if (typeof s === 'number') return Number.isFinite(s) ? s : null;
+  if (typeof s !== 'string') return null;
   s = s.trim();
   if (s === '' || s === '-') return null;
   const isPct = s.includes('%');
@@ -588,6 +590,33 @@ function parseNumber(s) {
     suffix === 'B' ? 1e9 : suffix === 'M' ? 1e6 : suffix === 'K' ? 1e3 : 1;
   const finalVal = val * multiplier;
   return neg ? -finalVal : finalVal;
+}
+
+function isLTM(label) {
+  const normalized = String(label || '').toLowerCase().trim();
+  return normalized.includes('ltm') || normalized === 'ttm';
+}
+
+function toSeries(row, options = {}) {
+  if (!row?.values?.length) return [];
+  const excludeLTM = options.excludeLTM !== false;
+  return row.values
+    .map((v, i) => ({
+      date: row.dates?.[i] ?? String(i),
+      value: parseNumber(v)
+    }))
+    .filter((p) => p.value !== null && (!excludeLTM || !isLTM(p.date)));
+}
+
+function alignByDate(rowA, rowB, n = 6, options = {}) {
+  const aSeries = toSeries(rowA, options);
+  const bMap = new Map(
+    toSeries(rowB, options).map((p) => [p.date, p.value])
+  );
+  return aSeries
+    .map((p) => ({ date: p.date, a: p.value, b: bMap.get(p.date) ?? null }))
+    .filter((p) => p.b !== null)
+    .slice(-n);
 }
 
 function splitMarkdownRow(row) {
@@ -986,12 +1015,19 @@ export function parseTIKR(raw) {
 // =========================================================
 // ANALYSIS ENGINE — COMPREHENSIVE HEURISTICS
 // =========================================================
-function getRecentValues(row, n = 5) {
+function getRecentValues(row, n = 5, options = {}) {
   if (!row) return [];
-  const mapped = row.values.map((v, i) => ({
-    value: parseNumber(v),
-    label: row.dates?.[i] || ''
-  }));
+  const mapped = row.values.map((v, i) => {
+    const label = row.dates?.[i] || '';
+    const value = parseNumber(v);
+    return {
+      value:
+        options.excludeLTM !== false && isLTM(label)
+          ? null
+          : value,
+      label
+    };
+  });
   const slicedAll = mapped.slice(-n);
   const slicedNumeric = slicedAll.filter((x) => x.value !== null);
   const vals = slicedNumeric.map((x) => x.value);
@@ -1003,13 +1039,13 @@ function getRecentValues(row, n = 5) {
 
 function getLatest(row) {
   if (!row) return null;
-  const vals = row.values.map((v) => parseNumber(v)).filter((v) => v !== null);
+  const vals = toSeries(row).map((p) => p.value);
   return vals.length > 0 ? vals[vals.length - 1] : null;
 }
 
 function getPrevious(row) {
   if (!row) return null;
-  const vals = row.values.map((v) => parseNumber(v)).filter((v) => v !== null);
+  const vals = toSeries(row).map((p) => p.value);
   return vals.length > 1 ? vals[vals.length - 2] : null;
 }
 
@@ -1131,6 +1167,14 @@ function inferProfile(snapshot = {}) {
     financial: 0,
     default: 0
   };
+  const sectorHint = String(snapshot.sectorHint || '').toLowerCase();
+  if (sectorHint.includes('financial') || sectorHint.includes('bank'))
+    score.financial += 3;
+  if (sectorHint.includes('utility') || sectorHint.includes('electric'))
+    score.utility += 3;
+  if (sectorHint.includes('software') || sectorHint.includes('saas'))
+    score.saas += 2;
+
   if (snapshot.grossMargin !== null) {
     if (snapshot.grossMargin >= 60) score.saas += 2;
     if (snapshot.grossMargin <= 30) {
@@ -1149,12 +1193,33 @@ function inferProfile(snapshot = {}) {
   }
   if (snapshot.netDebtEbitda !== null && snapshot.netDebtEbitda > 3)
     score.utility += 1;
+
+  if (snapshot.goodwillIntangiblesToAssets !== null) {
+    if (snapshot.goodwillIntangiblesToAssets > 30) score.saas += 1;
+    if (snapshot.goodwillIntangiblesToAssets < 10) score.industrial += 1;
+  }
+  if (snapshot.rdSales !== null) {
+    if (snapshot.rdSales > 10) score.saas += 1;
+    if (snapshot.rdSales < 2) score.utility += 1;
+  }
+  if (snapshot.sbcSales !== null) {
+    if (snapshot.sbcSales > 4) score.saas += 1;
+    if (snapshot.sbcSales < 1) score.industrial += 1;
+  }
+  if (snapshot.ppeAssets !== null) {
+    if (snapshot.ppeAssets > 35) {
+      score.industrial += 1;
+      score.utility += 1;
+    }
+    if (snapshot.ppeAssets < 15) score.saas += 1;
+  }
+
   const sorted = Object.entries(score).sort((a, b) => b[1] - a[1]);
   const [winner, pts] = sorted[0] || ['default', 0];
   const secondPts = sorted[1]?.[1] || 0;
   return {
     profile: pts >= 2 && pts - secondPts >= 1 ? winner : 'default',
-    confidence: Math.min(1, pts / 4)
+    confidence: Math.min(1, pts / 6)
   };
 }
 
@@ -1185,6 +1250,24 @@ const METRIC_TIPS = {
     'Deferred revenue (ingresos diferidos): cash collected before service delivery.'
 };
 
+
+function itemScore(item) {
+  const signalScore =
+    item.signal === 'bull' ? 1 : item.signal === 'bear' ? -1 : 0;
+  return signalScore * (item.confidence ?? 0.5);
+}
+
+function sectionGrade(items) {
+  const scored = (items || []).filter((i) => i.signal !== 'info');
+  const totalW = scored.reduce((acc, i) => acc + (i.confidence ?? 0.5), 0) || 1;
+  const score = scored.reduce((acc, i) => acc + itemScore(i), 0) / totalW;
+
+  if (score >= 0.55) return 'excellent';
+  if (score >= 0.2) return 'good';
+  if (score <= -0.35) return 'poor';
+  return 'average';
+}
+
 function deriveScoreRule(name, detail, signalText, explanation) {
   const n = String(name || '').toLowerCase();
   if (n.includes('current ratio'))
@@ -1198,7 +1281,12 @@ function deriveScoreRule(name, detail, signalText, explanation) {
   if (n.includes('revenue growth (cagr)'))
     return "signal = cagr > 15 ? 'bull' : cagr > 8 ? 'neutral' : 'bear'";
   if (n.includes('roic'))
-    return "signal = latest > bull_threshold ? 'bull' : latest > neutral_threshold ? 'neutral' : 'bear'";
+    return JSON.stringify({
+      metric: 'roic',
+      bull: "metricThreshold('roic', profile, 'bull')",
+      neutral: "metricThreshold('roic', profile, 'neutral')",
+      direction: 'higher'
+    });
   if (n.includes('total equity'))
     return "signal = latest > 0 && trend==='up' ? 'bull' : latest > 0 ? 'neutral' : 'bear'";
   return explanation || detail || signalText || '';
@@ -1364,23 +1452,54 @@ export function analyze(data, profile = 'default', options = {}) {
   const debtCore = findRowAny(bs, 'Total Debt', 'Deuda total');
   const invCore = findRowAny(bs, 'Inventory', 'Inventories', 'Inventarios');
   const assetsCore = findRowAny(bs, 'Total Assets', 'Activos totales');
+  const goodwillCore = findRowAny(bs, 'Goodwill', 'Fondo de comercio');
+  const intangiblesCore = findRowAny(bs, 'Other Intangibles', 'Intangible Assets', 'Activos intangibles');
+  const rdCore = findRowAny(is, 'Research and Development', 'R&D', 'Gastos de investigación');
+  const sbcProfileRow = findRowAny(cf, 'Stock-Based Compensation', 'Compensación basada en acciones');
+  const ppeCore = findRowAny(bs, 'Net Property Plant And Equipment', 'PP&E', 'Propiedad, planta y equipo');
+  const netDebtEbitdaCore = findRowAny(ratios, 'Net Debt / EBITDA', 'Deuda Neta / EBITDA');
 
   if (profile === 'auto') {
     const gm = getLatest(grossMarginRowCore);
+    const revLatest = getLatest(revenueRow);
+    const assetsLatest = getLatest(assetsCore);
     const capexSales =
-      getLatest(capexCore) !== null && getLatest(revenueRow)
-        ? (Math.abs(getLatest(capexCore)) / getLatest(revenueRow)) * 100
+      getLatest(capexCore) !== null && revLatest
+        ? (Math.abs(getLatest(capexCore)) / revLatest) * 100
         : null;
     const invPctAssets =
-      getLatest(invCore) !== null && getLatest(assetsCore)
-        ? (Math.abs(getLatest(invCore)) / getLatest(assetsCore)) * 100
+      getLatest(invCore) !== null && assetsLatest
+        ? (Math.abs(getLatest(invCore)) / assetsLatest) * 100
         : null;
-    const ndE = null;
+    const ndE = getLatest(netDebtEbitdaCore);
+    const goodwillIntangiblesToAssets =
+      assetsLatest && assetsLatest > 0
+        ? (((getLatest(goodwillCore) || 0) + (getLatest(intangiblesCore) || 0)) /
+            assetsLatest) *
+          100
+        : null;
+    const rdSales =
+      getLatest(rdCore) !== null && revLatest
+        ? (Math.abs(getLatest(rdCore)) / revLatest) * 100
+        : null;
+    const sbcSales =
+      getLatest(sbcProfileRow) !== null && revLatest
+        ? (Math.abs(getLatest(sbcProfileRow)) / revLatest) * 100
+        : null;
+    const ppeAssets =
+      getLatest(ppeCore) !== null && assetsLatest
+        ? (Math.abs(getLatest(ppeCore)) / assetsLatest) * 100
+        : null;
     const inferred = inferProfile({
       grossMargin: gm,
       capexSales,
       inventoryToAssets: invPctAssets,
-      netDebtEbitda: ndE
+      netDebtEbitda: ndE,
+      goodwillIntangiblesToAssets,
+      rdSales,
+      sbcSales,
+      ppeAssets,
+      sectorHint: options.sector || options.industry || null
     });
     activeProfile = inferred.profile;
     results.profileInference = inferred;
@@ -1575,15 +1694,7 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   if (growthItems.length) {
-    const bullCount = growthItems.filter((i) => i.signal === 'bull').length;
-    const grade =
-      bullCount >= 4
-        ? 'excellent'
-        : bullCount >= 2
-          ? 'good'
-          : bullCount >= 1
-            ? 'average'
-            : 'poor';
+    const grade = sectionGrade(growthItems);
     results.scores.growth = grade;
     results.sections.push({
       id: 'growth',
@@ -1770,15 +1881,7 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   if (marginItems.length) {
-    const bullCount = marginItems.filter((i) => i.signal === 'bull').length;
-    const grade =
-      bullCount >= 4
-        ? 'excellent'
-        : bullCount >= 2
-          ? 'good'
-          : bullCount >= 1
-            ? 'average'
-            : 'poor';
+    const grade = sectionGrade(marginItems);
     results.scores.margins = grade;
     results.sections.push({
       id: 'margins',
@@ -1802,20 +1905,19 @@ export function analyze(data, profile = 'default', options = {}) {
     'COGS'
   );
   if (cogsRow && revenueRow) {
-    const cogsVals = getRecentValues(cogsRow, 6);
-    const revVals = getRecentValues(revenueRow, 6);
-    if (cogsVals.length >= 2 && revVals.length >= 2) {
+    const pairs = alignByDate(cogsRow, revenueRow, 6);
+    if (pairs.length >= 2) {
       const latestPct =
-        (Math.abs(cogsVals[cogsVals.length - 1]) /
-          Math.abs(revVals[revVals.length - 1])) *
+        (Math.abs(pairs[pairs.length - 1].a) /
+          Math.abs(pairs[pairs.length - 1].b)) *
         100;
-      const firstPct = (Math.abs(cogsVals[0]) / Math.abs(revVals[0])) * 100;
+      const firstPct = (Math.abs(pairs[0].a) / Math.abs(pairs[0].b)) * 100;
       const delta = latestPct - firstPct;
       costItems.push(
         makeItem(
           'COGS as % of Revenue',
           `Latest: ${latestPct.toFixed(1)}% (Δ ${delta > 0 ? '+' : ''}${delta.toFixed(1)}pp)`,
-          cogsVals,
+          pairs.map((p) => p.a),
           delta < -2 ? 'bull' : delta < 2 ? 'neutral' : 'bear',
           delta < -2 ? 'Improving' : delta < 2 ? 'Stable' : 'Rising Costs'
         )
@@ -1865,19 +1967,17 @@ export function analyze(data, profile = 'default', options = {}) {
     'admin'
   ]);
   if (sgaRow && revenueRow) {
-    const sgaVals = getRecentValues(sgaRow, 6);
-    const revVals = getRecentValues(revenueRow, 6);
-    if (sgaVals.length >= 2 && revVals.length >= 2) {
+    const pairs = alignByDate(sgaRow, revenueRow, 6);
+    if (pairs.length >= 2) {
       const latestPct =
-        (Math.abs(sgaVals[sgaVals.length - 1]) / revVals[revVals.length - 1]) *
-        100;
-      const firstPct = (Math.abs(sgaVals[0]) / revVals[0]) * 100;
+        (Math.abs(pairs[pairs.length - 1].a) / pairs[pairs.length - 1].b) * 100;
+      const firstPct = (Math.abs(pairs[0].a) / pairs[0].b) * 100;
       const delta = latestPct - firstPct;
       costItems.push(
         makeItem(
           'SG&A as % of Revenue',
           `Latest: ${latestPct.toFixed(1)}% (Δ ${delta > 0 ? '+' : ''}${delta.toFixed(1)}pp)`,
-          sgaVals.map((v) => Math.abs(v)),
+          pairs.map((p) => Math.abs(p.a)),
           delta < -1 ? 'bull' : latestPct < 25 ? 'neutral' : 'bear',
           delta < -1
             ? 'Improving Efficiency'
@@ -1899,17 +1999,15 @@ export function analyze(data, profile = 'default', options = {}) {
     ['r&d', 'expense']
   );
   if (rdRow && revenueRow) {
-    const rdVals = getRecentValues(rdRow, 6);
-    const revVals = getRecentValues(revenueRow, 6);
-    if (rdVals.length >= 2 && revVals.length >= 2) {
+    const pairs = alignByDate(rdRow, revenueRow, 6);
+    if (pairs.length >= 2) {
       const latestPct =
-        (Math.abs(rdVals[rdVals.length - 1]) / revVals[revVals.length - 1]) *
-        100;
+        (Math.abs(pairs[pairs.length - 1].a) / pairs[pairs.length - 1].b) * 100;
       costItems.push(
         makeItem(
           'R&D as % of Revenue',
           `Latest: ${latestPct.toFixed(1)}%`,
-          rdVals.map((v) => Math.abs(v)),
+          pairs.map((p) => Math.abs(p.a)),
           latestPct > 5 ? 'bull' : latestPct > 2 ? 'neutral' : 'neutral',
           latestPct > 15
             ? 'Heavy Investment'
@@ -1930,17 +2028,15 @@ export function analyze(data, profile = 'default', options = {}) {
     'D&A'
   );
   if (daRow && revenueRow) {
-    const daVals = getRecentValues(daRow, 6);
-    const revVals = getRecentValues(revenueRow, 6);
-    if (daVals.length >= 2 && revVals.length >= 2) {
+    const pairs = alignByDate(daRow, revenueRow, 6);
+    if (pairs.length >= 2) {
       const latestPct =
-        (Math.abs(daVals[daVals.length - 1]) / revVals[revVals.length - 1]) *
-        100;
+        (Math.abs(pairs[pairs.length - 1].a) / pairs[pairs.length - 1].b) * 100;
       costItems.push(
         makeItem(
           'D&A as % of Revenue',
           `Latest: ${latestPct.toFixed(1)}%`,
-          daVals.map((v) => Math.abs(v)),
+          pairs.map((p) => Math.abs(p.a)),
           latestPct < 5 ? 'bull' : latestPct < 10 ? 'neutral' : 'bear',
           latestPct < 5
             ? 'Asset-light'
@@ -1992,18 +2088,16 @@ export function analyze(data, profile = 'default', options = {}) {
   // Interest Expense analysis
   const intExpRow = findRowAny(is, 'Gastos por intereses', 'Interest Expense');
   if (intExpRow && revenueRow) {
-    const intVals = getRecentValues(intExpRow, 6);
-    const revVals = getRecentValues(revenueRow, 6);
-    if (intVals.length >= 1 && revVals.length >= 1) {
+    const pairs = alignByDate(intExpRow, revenueRow, 6);
+    if (pairs.length >= 1) {
       const latestPct =
-        (Math.abs(intVals[intVals.length - 1]) / revVals[revVals.length - 1]) *
-        100;
+        (Math.abs(pairs[pairs.length - 1].a) / pairs[pairs.length - 1].b) * 100;
       if (latestPct > 0.5) {
         costItems.push(
           makeItem(
             'Interest Expense as % of Revenue',
             `Latest: ${latestPct.toFixed(1)}%`,
-            intVals.map((v) => Math.abs(v)),
+            pairs.map((p) => Math.abs(p.a)),
             latestPct < 2 ? 'bull' : latestPct < 5 ? 'neutral' : 'bear',
             latestPct < 2
               ? 'Minimal'
@@ -2024,17 +2118,15 @@ export function analyze(data, profile = 'default', options = {}) {
     'Stock Based Comp'
   );
   if (sbcRow && revenueRow) {
-    const sbcVals = getRecentValues(sbcRow, 6);
-    const revVals = getRecentValues(revenueRow, 6);
-    if (sbcVals.length >= 1 && revVals.length >= 1) {
+    const pairs = alignByDate(sbcRow, revenueRow, 6);
+    if (pairs.length >= 1) {
       const latestPct =
-        (Math.abs(sbcVals[sbcVals.length - 1]) / revVals[revVals.length - 1]) *
-        100;
+        (Math.abs(pairs[pairs.length - 1].a) / pairs[pairs.length - 1].b) * 100;
       costItems.push(
         makeItem(
           'Stock-Based Comp as % of Revenue',
           `Latest: ${latestPct.toFixed(1)}%`,
-          sbcVals.map((v) => Math.abs(v)),
+          pairs.map((p) => Math.abs(p.a)),
           latestPct < 3 ? 'bull' : latestPct < 8 ? 'neutral' : 'bear',
           latestPct < 3
             ? 'Low Dilution'
@@ -2048,16 +2140,7 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   if (costItems.length) {
-    const bullCount = costItems.filter((i) => i.signal === 'bull').length;
-    const bearCount = costItems.filter((i) => i.signal === 'bear').length;
-    const grade =
-      bullCount >= 3
-        ? 'excellent'
-        : bullCount >= 2
-          ? 'good'
-          : bearCount >= 2
-            ? 'poor'
-            : 'average';
+    const grade = sectionGrade(costItems);
     results.scores.costs = grade;
     results.sections.push({
       id: 'costs',
@@ -2244,15 +2327,7 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   if (moatItems.length) {
-    const bullCount = moatItems.filter((i) => i.signal === 'bull').length;
-    const grade =
-      bullCount >= 4
-        ? 'excellent'
-        : bullCount >= 2
-          ? 'good'
-          : bullCount >= 1
-            ? 'average'
-            : 'poor';
+    const grade = sectionGrade(moatItems);
     results.scores.moat = grade;
     results.sections.push({
       id: 'moat',
@@ -2295,16 +2370,14 @@ export function analyze(data, profile = 'default', options = {}) {
   const totalAssetsRow = findRowAny(bs, 'Activos totales', 'Total Assets');
 
   if (cashRow && totalAssetsRow) {
-    const cashVals = getRecentValues(cashRow, 6);
-    const taVals = getRecentValues(totalAssetsRow, 6);
-    if (cashVals.length >= 1 && taVals.length >= 1) {
-      const cashPct =
-        (cashVals[cashVals.length - 1] / taVals[taVals.length - 1]) * 100;
+    const pairs = alignByDate(cashRow, totalAssetsRow, 6);
+    if (pairs.length >= 1) {
+      const cashPct = (pairs[pairs.length - 1].a / pairs[pairs.length - 1].b) * 100;
       bsItems.push(
         makeItem(
           'Cash & Equivalents / Total Assets',
-          `Latest: ${cashPct.toFixed(1)}% ($${cashVals[cashVals.length - 1].toFixed(0)}M)`,
-          cashVals,
+          `Latest: ${cashPct.toFixed(1)}% ($${pairs[pairs.length - 1].a.toFixed(0)}M)`,
+          pairs.map((p) => p.a),
           cashPct > 15 ? 'bull' : cashPct > 5 ? 'neutral' : 'bear',
           cashPct > 20
             ? 'Cash Rich'
@@ -2319,19 +2392,15 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   if (arRow && revenueRow) {
-    const arVals = getRecentValues(arRow, 6);
-    const revVals = getRecentValues(revenueRow, 6);
-    if (arVals.length >= 2 && revVals.length >= 2) {
-      const arDays =
-        (arVals[arVals.length - 1] / revVals[revVals.length - 1]) * 365;
-      const trend = getTrend(
-        arVals.map((v, i) => (revVals[i] ? (v / revVals[i]) * 365 : null))
-      );
+    const pairs = alignByDate(arRow, revenueRow, 6);
+    if (pairs.length >= 2) {
+      const arDays = (pairs[pairs.length - 1].a / pairs[pairs.length - 1].b) * 365;
+      const trend = getTrend(pairs.map((p) => (p.b ? (p.a / p.b) * 365 : null)));
       bsItems.push(
         makeItem(
           'Accounts Receivable (Days)',
           `~${arDays.toFixed(0)} days — Trend: ${trend}`,
-          arVals,
+          pairs.map((p) => p.a),
           arDays < 45 ? 'bull' : arDays < 75 ? 'neutral' : 'bear',
           arDays < 30
             ? 'Quick Collection'
@@ -2493,16 +2562,7 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   if (bsItems.length) {
-    const bullCount = bsItems.filter((i) => i.signal === 'bull').length;
-    const bearCount = bsItems.filter((i) => i.signal === 'bear').length;
-    const grade =
-      bullCount >= 4
-        ? 'excellent'
-        : bullCount >= 2
-          ? 'good'
-          : bearCount >= 3
-            ? 'poor'
-            : 'average';
+    const grade = sectionGrade(bsItems);
     results.scores.balance = grade;
     results.sections.push({
       id: 'balance-composition',
@@ -2727,18 +2787,7 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   if (debtItems.length) {
-    const bullCount = debtItems.filter((i) => i.signal === 'bull').length;
-    const bearCount = debtItems.filter((i) => i.signal === 'bear').length;
-    const grade =
-      bullCount >= 4
-        ? 'excellent'
-        : bullCount >= 2
-          ? 'good'
-          : bearCount >= 3
-            ? 'poor'
-            : bullCount >= 1
-              ? 'average'
-              : 'poor';
+    const grade = sectionGrade(debtItems);
     results.scores.debt = grade;
     results.sections.push({
       id: 'debt',
@@ -2789,8 +2838,9 @@ export function analyze(data, profile = 'default', options = {}) {
 
   // CFO vs Net Income (Accrual check)
   if (cfoRow && netIncRow) {
-    const cfoVals = getRecentValues(cfoRow, 6);
-    const niVals = getRecentValues(netIncRow, 6);
+    const pairs = alignByDate(cfoRow, netIncRow, 6);
+    const cfoVals = pairs.map((p) => p.a);
+    const niVals = pairs.map((p) => p.b);
     if (cfoVals.length >= 3 && niVals.length >= 3) {
       const allMeaningful = niVals.every((v) => v !== null && v > 0);
       if (!allMeaningful) {
@@ -2836,11 +2886,10 @@ export function analyze(data, profile = 'default', options = {}) {
     'CapEx'
   );
   if (capexRow && cfoRow) {
-    const capVals = getRecentValues(capexRow, 6);
-    const cfoVals = getRecentValues(cfoRow, 6);
-    if (capVals.length >= 2 && cfoVals.length >= 2) {
-      const ratioVals = capVals
-        .map((v, i) => (cfoVals[i] ? (Math.abs(v) / cfoVals[i]) * 100 : null))
+    const pairs = alignByDate(capexRow, cfoRow, 6);
+    if (pairs.length >= 2) {
+      const ratioVals = pairs
+        .map((p) => (p.b ? (Math.abs(p.a) / p.b) * 100 : null))
         .filter((v) => v !== null);
       const latestR = ratioVals[ratioVals.length - 1];
       cfItems.push(
@@ -2968,16 +3017,7 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   if (cfItems.length) {
-    const bullCount = cfItems.filter((i) => i.signal === 'bull').length;
-    const bearCount = cfItems.filter((i) => i.signal === 'bear').length;
-    const grade =
-      bullCount >= 4
-        ? 'excellent'
-        : bullCount >= 2
-          ? 'good'
-          : bearCount >= 3
-            ? 'poor'
-            : 'average';
+    const grade = sectionGrade(cfItems);
     results.scores.cashflow = grade;
     results.sections.push({
       id: 'cashflow',
@@ -3183,15 +3223,7 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   if (effItems.length) {
-    const bullCount = effItems.filter((i) => i.signal === 'bull').length;
-    const grade =
-      bullCount >= 3
-        ? 'excellent'
-        : bullCount >= 2
-          ? 'good'
-          : bullCount >= 1
-            ? 'average'
-            : 'poor';
+    const grade = sectionGrade(effItems);
     results.scores.efficiency = grade;
     results.sections.push({
       id: 'efficiency',
@@ -3487,16 +3519,7 @@ export function analyze(data, profile = 'default', options = {}) {
   );
 
   if (valItems.length) {
-    const bullCount = valItems.filter((i) => i.signal === 'bull').length;
-    const bearCount = valItems.filter((i) => i.signal === 'bear').length;
-    const grade =
-      bullCount >= 4
-        ? 'excellent'
-        : bullCount >= 2
-          ? 'good'
-          : bearCount >= 4
-            ? 'poor'
-            : 'average';
+    const grade = sectionGrade(valItems);
     results.scores.valuation = grade;
     results.sections.push({
       id: 'valuation',
@@ -3701,15 +3724,7 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   if (shItems.length) {
-    const bullCount = shItems.filter((i) => i.signal === 'bull').length;
-    const grade =
-      bullCount >= 3
-        ? 'excellent'
-        : bullCount >= 2
-          ? 'good'
-          : bullCount >= 1
-            ? 'average'
-            : 'poor';
+    const grade = sectionGrade(shItems);
     results.scores.shareholder = grade;
     results.sections.push({
       id: 'shareholder',
