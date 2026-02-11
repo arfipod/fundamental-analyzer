@@ -16,8 +16,11 @@ const sampleResults = {
       items: [
         {
           name: 'Revenue Growth (CAGR)',
+          detail: 'Revenue is compounding over the observed period',
+          explanation: 'FY22: 9.8 % · FY23: 11.1 % · FY24: 12.5 %',
           value: '12.5%',
           signal: 'bull',
+          signalText: 'Acceleration is healthy',
           note: 'Solid growth trend'
         }
       ]
@@ -48,6 +51,9 @@ describe('printable dashboard', () => {
     expect(html).toContain('data-panel="print"');
     expect(html).toContain('Quick summary');
     expect(html).toContain('Revenue Growth (CAGR)');
+    expect(html).toContain('Revenue is compounding over the observed period');
+    expect(html).toContain('FY22: 9.8 % · FY23: 11.1 % · FY24: 12.5 %');
+    expect(html).toContain('Signal:</strong> 🟢 Positive · Acceleration is healthy');
     expect(html).toContain('Simplified print-friendly view');
   });
 });

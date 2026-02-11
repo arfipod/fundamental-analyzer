@@ -4498,6 +4498,9 @@ function buildPrintableDashboardPanel(data, results, industrySelection = null) {
       const metrics = (section.items || [])
         .map((item) => {
           const metricName = localizeDynamicText(item.name || 'Metric');
+          const metricDetail = localizeDynamicText(item.detail || '');
+          const metricValues = localizeDynamicText(item.explanation || '');
+          const signalText = localizeDynamicText(item.signalText || '');
           const signal =
             item.signal === 'bull'
               ? currentLang === 'es'
@@ -4512,7 +4515,13 @@ function buildPrintableDashboardPanel(data, results, industrySelection = null) {
                   : '🟡 Neutral';
           const note = localizeDynamicText(item.note || '');
           const value = item.value != null ? ` (${item.value})` : '';
-          return `<li><strong>${escapeHtml(metricName)}</strong>${escapeHtml(value)} — ${escapeHtml(signal)}${note ? `<br/><span>${escapeHtml(note)}</span>` : ''}</li>`;
+          return `<li>
+            <strong>${escapeHtml(metricName)}</strong>${escapeHtml(value)}
+            ${metricDetail ? `<br/><span>${escapeHtml(metricDetail)}</span>` : ''}
+            ${metricValues ? `<br/><span>${escapeHtml(metricValues)}</span>` : ''}
+            <br/><span><strong>${escapeHtml(currentLang === 'es' ? 'Señal' : 'Signal')}:</strong> ${escapeHtml(signal)}${signalText ? ` · ${escapeHtml(signalText)}` : ''}</span>
+            ${note ? `<br/><span>${escapeHtml(note)}</span>` : ''}
+          </li>`;
         })
         .join('');
       return `<section><h3>${escapeHtml(sectionTitle)}</h3><ul>${metrics}</ul></section>`;
