@@ -986,12 +986,16 @@ export function parseTIKR(raw) {
 // =========================================================
 function getRecentValues(row, n = 5) {
   if (!row) return [];
-  const mapped = row.values
-    .map((v, i) => ({ value: parseNumber(v), label: row.dates?.[i] || '' }))
-    .filter((x) => x.value !== null);
-  const sliced = mapped.slice(-n);
-  const vals = sliced.map((x) => x.value);
-  vals.labels = sliced.map((x) => x.label);
+  const mapped = row.values.map((v, i) => ({
+    value: parseNumber(v),
+    label: row.dates?.[i] || ''
+  }));
+  const slicedAll = mapped.slice(-n);
+  const slicedNumeric = slicedAll.filter((x) => x.value !== null);
+  const vals = slicedNumeric.map((x) => x.value);
+  vals.labels = slicedNumeric.map((x) => x.label);
+  vals.fullValues = slicedAll.map((x) => x.value);
+  vals.fullLabels = slicedAll.map((x) => x.label);
   return vals;
 }
 
@@ -4618,7 +4622,7 @@ export function renderDashboard(data, results, industrySelection = null) {
             <div class="metric-detail">${localizeDynamicText(item.detail || '')}</div>
             ${item.explanation ? `<div class="metric-values">${localizeDynamicText(item.explanation)}</div>` : ''}
             <div class="metric-values">${t('confidence', 'Confidence')}: ${(item.confidence * 100).toFixed(0)}%</div>
-            ${renderTrendBars(item.values, item.labels || [])}
+            ${renderTrendBars(item.values?.fullValues || item.values, item.values?.fullLabels || item.labels || [])}
           </div>
           <div class="signal ${sigCls}">
             <span class="dot ${dotCls}"></span>

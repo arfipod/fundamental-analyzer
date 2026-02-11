@@ -61,4 +61,26 @@ describe('renderDashboard trend bars', () => {
     expect(missingBarCount).toBe(2);
     expect(html).toContain('2021: 15.00');
   });
+  it('uses full period metadata when available to keep missing temporal gaps', () => {
+    const values = [10, 20] as number[] & {
+      fullValues?: Array<number | null>;
+      fullLabels?: string[];
+    };
+    values.fullValues = [10, null, 20];
+    values.fullLabels = ['2021', '2022', '2023'];
+
+    const html = renderDashboard(
+      { company: 'Acme Corp' },
+      makeResults({ values, labels: ['legacy-1', 'legacy-2'] })
+    );
+
+    const totalBars = (html.match(/class="bar /g) || []).length;
+    const missingBarCount = (html.match(/bar-missing/g) || []).length;
+
+    expect(totalBars).toBe(3);
+    expect(missingBarCount).toBe(1);
+    expect(html).toContain('2021: 10.00');
+    expect(html).toContain('2023: 20.00');
+  });
+
 });
