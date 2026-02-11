@@ -1752,7 +1752,7 @@ export function analyze(data, profile = 'default', options = {}) {
         makeItem(
           'Operating Leverage',
           `Gross Δ: ${grossDelta > 0 ? '+' : ''}${grossDelta.toFixed(1)}pp | Op Δ: ${opDelta > 0 ? '+' : ''}${opDelta.toFixed(1)}pp`,
-          [],
+          opVals,
           expanding ? 'bull' : opDelta > 0 ? 'neutral' : 'bear',
           expanding
             ? 'Positive Leverage'

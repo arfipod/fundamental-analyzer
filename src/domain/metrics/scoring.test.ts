@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 
-import { renderDashboard } from './scoring';
+import { renderDashboard, analyze, setLanguage } from './scoring';
 
 function makeResults(itemOverrides: Record<string, unknown>) {
   return {
@@ -81,6 +81,45 @@ describe('renderDashboard trend bars', () => {
     expect(missingBarCount).toBe(1);
     expect(html).toContain('2021: 10.00');
     expect(html).toContain('2023: 20.00');
+  });
+
+
+  it('keeps operating leverage trend bars when intermediate periods are missing', () => {
+    setLanguage('en');
+    const dates = ['2020', '2021', '2022', '2023'];
+    const data = {
+      company: 'Acme Corp',
+      sections: {
+        'Income Statement': {
+          dates,
+          rows: [
+            {
+              label: '% Gross Margins',
+              values: ['40%', '', '43%', '45%'],
+              dates
+            },
+            {
+              label: '% Operating Margins',
+              values: ['30%', '31%', '', '33%'],
+              dates
+            }
+          ]
+        }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false });
+    const margins = results.sections.find((s: { id?: string }) => s.id === 'margins');
+    const opLeverage = margins?.items.find(
+      (item: { name?: string }) => item.name === 'Operating Leverage'
+    );
+
+    expect(opLeverage).toBeTruthy();
+    expect(opLeverage.values?.fullValues).toEqual([30, 31, null, 33]);
+
+    const html = renderDashboard(data, results, null);
+    expect(html).toMatch(/Operating Leverage[\s\S]*?class="trend-bar"/);
+    expect(html).toMatch(/Operating Leverage[\s\S]*?bar-missing/);
   });
 
 });
