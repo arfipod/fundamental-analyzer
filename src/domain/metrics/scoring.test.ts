@@ -163,3 +163,46 @@ describe('renderDashboard trend bars', () => {
   });
 
 });
+
+describe('FCF Uses Summary formatting', () => {
+  it('includes total FCF and per-item percentages without "% )" spacing in Spanish', () => {
+    setLanguage('es');
+    const dates = ['2024'];
+    const data = {
+      company: 'Acme Corp',
+      sections: {
+        'Income Statement': { dates, rows: [] },
+        'Balance Sheet': { dates, rows: [] },
+        Ratios: { dates, rows: [] },
+        'Cash Flow': {
+          dates,
+          rows: [
+            { label: 'Free Cash Flow', values: ['123324'], dates },
+            { label: 'Share Buybacks', values: ['-97767'], dates },
+            { label: 'Dividends Paid', values: ['-15486'], dates },
+            { label: 'Debt Repaid', values: ['-12085'], dates },
+            { label: 'Net Change in Cash', values: ['15018'], dates }
+          ]
+        }
+      }
+    };
+
+    const results = analyze(data, 'default', {
+      includeAnalystNoise: false
+    }) as { sections: ResultSection[] };
+    const allItems = results.sections.flatMap((section) => section.items || []);
+    const fcfUses = allItems.find((item) => item.name === 'FCF Uses Summary') as
+      | { explanation?: string }
+      | undefined;
+
+    expect(fcfUses).toBeTruthy();
+    const html = renderDashboard(data, results, null);
+
+    expect(html).toContain('flujo de caja libre (FCF) total 123324');
+    expect(html).toContain('recompras 97767 (79.3 %)');
+    expect(html).toContain('dividendos 15486 (12.6 %)');
+    expect(html).toContain('amortización de deuda 12085 (9.8 %)');
+    expect(html).toContain('aumento/acumulación de caja 15018 (12.2 %)');
+    expect(html).not.toContain('% )');
+  });
+});
