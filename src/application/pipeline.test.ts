@@ -16,6 +16,21 @@ type ParsedInput = {
   sections?: Record<string, ParsedSection>;
 };
 
+
+type AnalysisItem = {
+  name?: string;
+  detail?: string;
+};
+
+type AnalysisSection = {
+  items?: AnalysisItem[];
+};
+
+type AnalysisResult = {
+  scores?: Record<string, unknown>;
+  sections?: AnalysisSection[];
+};
+
 class MemoryStorage {
   private data = new Map<string, string>();
   getItem(key: string): string | null {
@@ -55,7 +70,7 @@ describe('analysis pipeline', () => {
     const parsed = parseInput(fixture) as ParsedInput;
     const results = runAnalysis(parsed, 'default', {
       includeAnalystNoise: false
-    });
+    }) as AnalysisResult;
 
     expect(Object.keys(parsed.sections ?? {}).length).toBeGreaterThan(0);
     expect(Object.keys(results.scores ?? {}).length).toBeGreaterThan(0);
@@ -75,9 +90,11 @@ describe('analysis pipeline', () => {
     const parsed = parseInput(fixture) as ParsedInput;
     const results = runAnalysis(parsed, 'default', {
       includeAnalystNoise: false
-    });
+    }) as AnalysisResult;
 
-    const allItems = (results.sections || []).flatMap((section) => section.items || []);
+    const allItems = (results.sections || []).flatMap((section: AnalysisSection) =>
+      section.items || []
+    );
 
     const retained = allItems.find((item) => item.name === 'Retained Earnings');
     expect(retained?.detail || '').toMatch(/recompras\/dividendos|buybacks\/dividends/i);
