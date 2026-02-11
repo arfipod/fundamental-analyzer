@@ -2652,7 +2652,6 @@ function renderTrendBars(values, labels = []) {
 }
 
 export function renderDashboard(data, results, industrySelection = null) {
-  const d = document.getElementById('dashboard');
   const overallLabel = gradeLabel(results.overall || 'average');
 
   let html = `
@@ -2751,8 +2750,6 @@ export function renderDashboard(data, results, industrySelection = null) {
 
   html += buildSummary(data, results);
   html += `</div><div class="dashboard-panel" data-panel="industry" style="display:none">${buildIndustryPanel(data, results, industrySelection)}</div>`;
-  d.innerHTML = html;
-  updateToggleSectionsButton();
   return html;
 }
 
@@ -2941,26 +2938,10 @@ function goBack() {
 function syncCustomProfileUI() {
   const sel = document.getElementById('profileSelect');
   const wrap = document.getElementById('customProfileWrap');
+  if (!sel || !wrap) return;
   wrap.style.display = sel.value === 'custom' ? 'block' : 'none';
 }
 
-// Run once on load
-document.addEventListener('DOMContentLoaded', () => {
-  syncCustomProfileUI();
-  populateIndustrySelector();
-  const langSel = document.getElementById('langSelect');
-  if (langSel) {
-    langSel.value = currentLang;
-    langSel.addEventListener('change', (e) => setLanguage(e.target.value));
-  }
-  applyLocalization();
-  document.getElementById('profileSelect')?.addEventListener('change', syncCustomProfileUI);
-
-  // QoL: Ctrl/Cmd + Enter triggers analyze
-  document.getElementById('dataInput')?.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') analyzeData();
-  });
-});
 
 function analyzeData() {
   const raw = document.getElementById('dataInput').value.trim();
