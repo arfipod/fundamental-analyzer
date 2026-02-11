@@ -77,7 +77,8 @@ describe('analysis pipeline', () => {
       '2025-05-31'
     ]);
     expect(
-      incomeStatement?.rows.some((r: ParsedRow) => r.label === 'Revenues')
+      incomeStatement?.rows.some((r: ParsedRow) =>
+        r.label === 'Revenues' || r.label === 'Total Revenues')
     ).toBe(
       true
     );
@@ -134,5 +135,35 @@ describe('analysis pipeline', () => {
     expect(() =>
       runAnalysis(parsed, 'default', { includeAnalystNoise: false })
     ).not.toThrow();
+  });
+
+  it('parses separated markdown tables without ticker/company metadata', async () => {
+    const { parseInput } = await import('./parse');
+
+    const markdown = `| Income Statement | 31/12/23 | 31/12/24 | LTM |
+| --- | --- | --- | --- |
+| Total Revenues | 50.133,00 | 56.150,00 | 58.911,00 |
+| Net Income to Common | 9.028,00 | 9.272,00 | 9.675,00 |
+
+| Balance Sheet | 31/12/23 | 31/12/24 |
+| --- | --- | --- |
+| Total Assets | 230.682,00 | 246.548,00 |
+| Total Equity | 59.507,00 | 64.021,00 |`;
+
+    const parsed = parseInput(markdown) as ParsedInput;
+
+    expect(parsed.sections?.['Income Statement']).toBeTruthy();
+    expect(parsed.sections?.['Balance Sheet']).toBeTruthy();
+    expect(
+      parsed.sections?.['Income Statement']?.rows.some(
+        (r: ParsedRow) =>
+        r.label === 'Revenues' || r.label === 'Total Revenues'
+      )
+    ).toBe(true);
+    expect(
+      parsed.sections?.['Balance Sheet']?.rows.some(
+        (r: ParsedRow) => r.label === 'Total Assets'
+      )
+    ).toBe(true);
   });
 });
