@@ -72,8 +72,18 @@ describe('AnalyzerPage', () => {
     const options = within(industrySelect as HTMLElement).getAllByRole(
       'option'
     );
-    expect(options).toHaveLength(1);
-    expect(options[0].textContent).toContain('Banks');
+    expect(options).toHaveLength(2);
+    expect(options[0].textContent).toContain('-- Ninguna --');
+    expect(options[1].textContent).toContain('Banks');
+  });
+
+  it('uses no industry as default selection', () => {
+    render(<AnalyzerPage />);
+
+    const industrySelect = document.getElementById(
+      'industrySelect'
+    ) as HTMLSelectElement;
+    expect(industrySelect.value).toBe('');
   });
 
 
@@ -99,6 +109,7 @@ describe('AnalyzerPage', () => {
     const args = analyzeSpy.mock.calls[0];
     expect(args[0]).toHaveLength(130);
     expect(args[1]).toBe(true);
+    expect(args[2]).toBe('');
     expect(args[3]).toBe('es');
   });
 
