@@ -1,10 +1,6 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  openPrintView,
-  renderDashboard,
-  setCurrentLang
-} from './scoring';
+import { describe, expect, it } from 'vitest';
+import { renderDashboard, setCurrentLang } from './scoring';
 
 const sampleResults = {
   overall: 'good',
@@ -37,36 +33,21 @@ const sampleData = {
 };
 
 describe('printable dashboard', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('renders print action button in dashboard header', () => {
+  it('renders print action button and print tab', () => {
     setCurrentLang('es');
     const html = renderDashboard(sampleData, sampleResults, null);
-    expect(html).toContain('🖨️ Imprimir');
+
+    expect(html).toContain("switchDashboardTab('print')");
+    expect(html).toContain('🖨️ Imprimible');
   });
 
-  it('opens a simplified printable window', () => {
+  it('renders a simplified printable panel in the dashboard', () => {
     setCurrentLang('en');
-    renderDashboard(sampleData, sampleResults, null);
+    const html = renderDashboard(sampleData, sampleResults, null);
 
-    const write = vi.fn();
-    const popup = {
-      document: {
-        open: vi.fn(),
-        write,
-        close: vi.fn()
-      }
-    };
-
-    vi.stubGlobal('open', vi.fn(() => popup));
-
-    openPrintView();
-
-    expect(write).toHaveBeenCalledTimes(1);
-    expect(write.mock.calls[0][0]).toContain('Quick summary');
-    expect(write.mock.calls[0][0]).toContain('Revenue Growth (CAGR)');
-    expect(write.mock.calls[0][0]).toContain('🖨️ Print');
+    expect(html).toContain('data-panel="print"');
+    expect(html).toContain('Quick summary');
+    expect(html).toContain('Revenue Growth (CAGR)');
+    expect(html).toContain('Simplified print-friendly view');
   });
 });

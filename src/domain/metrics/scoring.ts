@@ -4491,9 +4491,7 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
-let latestPrintableContext = null;
-
-function buildPrintableDashboardHtml(data, results, industrySelection = null) {
+function buildPrintableDashboardPanel(data, results, industrySelection = null) {
   const sectionBlocks = (results.sections || [])
     .map((section) => {
       const sectionTitle = `${section.icon || '•'} ${localizeDynamicText(section.title || '')}`;
@@ -4528,41 +4526,20 @@ function buildPrintableDashboardHtml(data, results, industrySelection = null) {
       ? 'Sin industria seleccionada'
       : 'No selected industry';
 
-  return `<!DOCTYPE html>
-<html lang="${currentLang}">
-  <head>
-    <meta charset="utf-8" />
-    <title>${escapeHtml(data.ticker || data.company)} · ${currentLang === 'es' ? 'Versión imprimible' : 'Printable view'}</title>
-    <style>
-      body { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem auto; max-width: 900px; line-height: 1.55; color: #111827; padding: 0 1rem; }
-      h1, h2, h3 { line-height: 1.25; margin-bottom: .45rem; }
-      h1 { margin-top: 0; }
-      .meta { color: #4b5563; margin-bottom: 1.2rem; }
-      .summary { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: .9rem 1rem; margin-bottom: 1.25rem; }
-      ul { margin-top: .35rem; padding-left: 1.2rem; }
-      li { margin-bottom: .55rem; }
-      section { margin-bottom: 1.25rem; break-inside: avoid; }
-      .print-actions { margin: 1rem 0 1.5rem; }
-      button { background: #111827; border: 0; color: #fff; border-radius: 6px; padding: .6rem .9rem; font-weight: 600; cursor: pointer; }
-      @media print {
-        body { margin: 0; max-width: none; padding: 0; }
-        .print-actions { display: none; }
-      }
-    </style>
-  </head>
-  <body>
-    <div class="print-actions"><button onclick="window.print()">${currentLang === 'es' ? '🖨️ Imprimir' : '🖨️ Print'}</button></div>
-    <h1>${escapeHtml(data.ticker ? `${data.ticker} — ${data.company}` : data.company)}</h1>
-    <p class="meta">${escapeHtml(data.period || '')}</p>
-    <div class="summary">
-      <h2>${currentLang === 'es' ? 'Resumen rápido' : 'Quick summary'}</h2>
+  return `<div class="printable-panel fade-up">
+    <div class="printable-header">
+      <h2>${escapeHtml(data.ticker ? `${data.ticker} — ${data.company}` : data.company)}</h2>
+      <p>${escapeHtml(data.period || '')}</p>
+      <p class="printable-help">${currentLang === 'es' ? 'Vista simplificada para imprimir. Puedes usar la impresión del navegador (Ctrl/Cmd+P).' : 'Simplified print-friendly view. Use your browser print dialog (Ctrl/Cmd+P).'}</p>
+    </div>
+    <div class="printable-summary">
+      <h3>${currentLang === 'es' ? 'Resumen rápido' : 'Quick summary'}</h3>
       <p>${escapeHtml(scoreLine)}</p>
       <p>${escapeHtml(currentLang === 'es' ? 'Industria:' : 'Industry:')} ${escapeHtml(industryLine)}</p>
       <p>${escapeHtml(currentLang === 'es' ? `Métricas analizadas: ${results.totalMetrics}` : `Analyzed metrics: ${results.totalMetrics}`)}</p>
     </div>
     ${sectionBlocks}
-  </body>
-</html>`;
+  </div>`;
 }
 
 function renderTrendBars(values, labels = []) {
@@ -4590,7 +4567,6 @@ function renderTrendBars(values, labels = []) {
 }
 
 export function renderDashboard(data, results, industrySelection = null) {
-  latestPrintableContext = { data, results, industrySelection };
   const overallLabel = gradeLabel(results.overall || 'average');
 
   let html = `
@@ -4600,7 +4576,7 @@ export function renderDashboard(data, results, industrySelection = null) {
         <span class="price">${data.price || ''} ${data.period ? '• ' + localizeDynamicText(data.period) : ''} • ${results.totalMetrics} ${t('metricsAnalyzed', 'metrics analyzed')}</span>
       </div>
       <div class="header-actions">
-        <button class="btn-toggle-sections" onclick="openPrintView()">${currentLang === 'es' ? '🖨️ Imprimir' : '🖨️ Print'}</button>
+        <button class="btn-toggle-sections" onclick="switchDashboardTab('print')">${currentLang === 'es' ? '🖨️ Imprimir' : '🖨️ Print'}</button>
         <button id="toggleSectionsBtn" class="btn-toggle-sections" onclick="toggleAllSections()">${t('collapseAll', 'Collapse all sections')}</button>
         <button class="btn-back" onclick="goBack()">${t('newAnalysis', '← New Analysis')}</button>
       </div>
@@ -4608,6 +4584,7 @@ export function renderDashboard(data, results, industrySelection = null) {
     <div class="dashboard-tabs fade-up">
       <button class="dashboard-tab active" data-tab="analysis" onclick="switchDashboardTab('analysis')">${currentLang === 'es' ? 'Análisis' : 'Analysis'}</button>
       <button class="dashboard-tab" data-tab="industry" onclick="switchDashboardTab('industry')">${currentLang === 'es' ? 'KPIs por industria' : 'Industry KPIs'}</button>
+      <button class="dashboard-tab" data-tab="print" onclick="switchDashboardTab('print')">${currentLang === 'es' ? '🖨️ Imprimible' : '🖨️ Printable'}</button>
     </div>
     <div class="dashboard-panel" data-panel="analysis">
   `;
@@ -4720,7 +4697,7 @@ export function renderDashboard(data, results, industrySelection = null) {
   });
 
   html += buildSummary(data, results);
-  html += `</div><div class="dashboard-panel" data-panel="industry" style="display:none">${buildIndustryPanel(data, results, industrySelection)}</div>`;
+  html += `</div><div class="dashboard-panel" data-panel="industry" style="display:none">${buildIndustryPanel(data, results, industrySelection)}</div><div class="dashboard-panel" data-panel="print" style="display:none">${buildPrintableDashboardPanel(data, results, industrySelection)}</div>`;
   return html;
 }
 
@@ -4957,20 +4934,6 @@ export function switchDashboardTab(tab) {
   document.querySelectorAll('.dashboard-panel').forEach((panel) => {
     panel.style.display = panel.dataset.panel === tab ? 'block' : 'none';
   });
-}
-
-export function openPrintView() {
-  if (!latestPrintableContext) return;
-  const popup = window.open('', '_blank', 'noopener,noreferrer,width=980,height=900');
-  if (!popup) return;
-  const html = buildPrintableDashboardHtml(
-    latestPrintableContext.data,
-    latestPrintableContext.results,
-    latestPrintableContext.industrySelection
-  );
-  popup.document.open();
-  popup.document.write(html);
-  popup.document.close();
 }
 
 // =========================================================

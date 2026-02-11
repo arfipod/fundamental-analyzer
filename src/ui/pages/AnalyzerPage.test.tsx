@@ -39,8 +39,7 @@ vi.mock('../../domain/metrics/scoring', () => ({
   switchDashboardTab: vi.fn(),
   toggleAllSections: vi.fn(),
   toggleSection: vi.fn(),
-  updateToggleSectionsButton: vi.fn(),
-  openPrintView: vi.fn()
+  updateToggleSectionsButton: vi.fn()
 }));
 
 
