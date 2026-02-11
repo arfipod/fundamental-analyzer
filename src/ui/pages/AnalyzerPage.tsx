@@ -18,7 +18,27 @@ export function AnalyzerPage() {
     []
   );
   const [industry, setIndustry] = useState(sortedIndustries[0]?.code ?? '');
+  const [industryQuery, setIndustryQuery] = useState('');
   const [includeAnalystNoise, setIncludeAnalystNoise] = useState(false);
+
+  const filteredIndustries = useMemo(() => {
+    const query = industryQuery.trim().toLowerCase();
+    if (!query) return sortedIndustries;
+
+    return sortedIndustries.filter((item) => {
+      const haystack = `${item.name} ${item.code}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [industryQuery, sortedIndustries]);
+
+  useEffect(() => {
+    if (filteredIndustries.length > 0) {
+      const selectedStillVisible = filteredIndustries.some((item) => item.code === industry);
+      if (!selectedStillVisible) {
+        setIndustry(filteredIndustries[0].code);
+      }
+    }
+  }, [filteredIndustries, industry]);
 
   useEffect(() => {
     window.toggleSection = toggleSection;
@@ -77,19 +97,32 @@ export function AnalyzerPage() {
               }}
             >
               <label
-                htmlFor="industrySelect"
+                htmlFor="industrySearch"
                 className="mono"
                 style={{ fontSize: '.8rem', color: 'var(--text-dim)' }}
               >
                 {t('industry')}
               </label>
+              <input
+                id="industrySearch"
+                className="profile-select"
+                style={{ width: 'min(100%, 420px)' }}
+                value={industryQuery}
+                onChange={(e) => setIndustryQuery(e.target.value)}
+                placeholder={
+                  lang === 'es'
+                    ? 'Buscar industria por nombre o código…'
+                    : 'Search industry by name or code…'
+                }
+              />
               <select
                 id="industrySelect"
                 className="profile-select"
+                style={{ width: 'min(100%, 420px)' }}
                 value={industry}
                 onChange={(e) => setIndustry(e.target.value)}
               >
-                {sortedIndustries.map((item) => (
+                {filteredIndustries.map((item) => (
                   <option key={item.code} value={item.code}>{`${item.name} (${item.code})`}</option>
                 ))}
               </select>

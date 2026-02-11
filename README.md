@@ -83,6 +83,7 @@ npm run test
 - [ ] Language switching updates UI and persists after refresh.
 - [ ] Analyzer accepts a valid TIKR sample and renders dashboard.
 - [ ] Section collapse/expand and “open/close all” work.
+- [ ] Industry selector search filters by name/code and updates selection.
 - [ ] Industry selector changes profile panel output.
 - [ ] `fundamental-analyzer.html` redirects correctly.
 
