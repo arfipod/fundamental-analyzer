@@ -98,6 +98,29 @@ describe('renderDashboard trend bars', () => {
   });
 
 
+
+  it('exposes period and value in native tooltip attributes for each rendered bar', () => {
+    const html = renderDashboard(
+      { company: 'Acme Corp' },
+      makeResults({ values: [12.5, 15], labels: ['31/12/23', '31/12/24'] })
+    );
+
+    document.body.innerHTML = html;
+
+    const bars = Array.from(document.querySelectorAll('.trend-bar .bar'));
+    expect(bars).toHaveLength(2);
+
+    bars.forEach((bar) => {
+      const title = bar.getAttribute('title');
+      const ariaLabel = bar.getAttribute('aria-label');
+      expect(title).toBeTruthy();
+      expect(title).toMatch(/^.+: -?\d+\.\d{2}$/);
+      expect(ariaLabel).toBe(title);
+    });
+
+    expect(document.body.textContent).not.toContain('Sin datos');
+  });
+
   it('keeps operating leverage trend bars when intermediate periods are missing', () => {
     setLanguage('en');
     const dates = ['2020', '2021', '2022', '2023'];
