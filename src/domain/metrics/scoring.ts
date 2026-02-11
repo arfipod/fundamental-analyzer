@@ -648,6 +648,16 @@ function isLTM(label) {
   return normalized.includes('ltm') || normalized === 'ttm';
 }
 
+function isNonPeriodLabel(label) {
+  const normalized = String(label || '').toLowerCase().trim();
+  return (
+    normalized.includes('cagr') ||
+    normalized.includes('crecmiento compuesto') ||
+    normalized.includes('crecimiento compuesto') ||
+    normalized.includes('compound growth')
+  );
+}
+
 function toSeries(row, options = {}) {
   if (!row?.values?.length) return [];
   const excludeLTM = options.excludeLTM !== false;
@@ -656,7 +666,12 @@ function toSeries(row, options = {}) {
       date: row.dates?.[i] ?? String(i),
       value: parseNumber(v)
     }))
-    .filter((p) => p.value !== null && (!excludeLTM || !isLTM(p.date)));
+    .filter(
+      (p) =>
+        p.value !== null &&
+        (!excludeLTM || !isLTM(p.date)) &&
+        !isNonPeriodLabel(p.date)
+    );
 }
 
 function alignByDate(rowA, rowB, n = 6, options = {}) {
@@ -1071,11 +1086,14 @@ function getRecentValues(row, n = 5, options = {}) {
   const mapped = row.values.map((v, i) => {
     const label = row.dates?.[i] || '';
     const value = parseNumber(v);
+    const skipNonPeriod = isNonPeriodLabel(label);
     return {
       value:
         options.excludeLTM !== false && isLTM(label)
           ? null
-          : value,
+          : skipNonPeriod
+            ? null
+            : value,
       label
     };
   });
@@ -2632,6 +2650,8 @@ export function analyze(data, profile = 'default', options = {}) {
   const debtEquityRow = findRowAny(
     ratios,
     'Deuda total / Fondos propios',
+    'Deuda total / capital total',
+    'Pasivo total / Activo total',
     'Total Debt/Equity',
     'Debt to Equity'
   );
@@ -2651,6 +2671,44 @@ export function analyze(data, profile = 'default', options = {}) {
             : latest < 80
               ? 'Moderate'
               : 'Leveraged'
+      )
+    );
+  }
+
+  const debtCapitalRow = findRowAny(
+    ratios,
+    'Deuda total / Capital total',
+    'Total Debt / Capital'
+  );
+  if (debtCapitalRow) {
+    const vals = getRecentValues(debtCapitalRow, 8);
+    const latest = vals[vals.length - 1];
+    debtItems.push(
+      makeItem(
+        'Total Debt / Capital',
+        `Latest: ${latest?.toFixed(1)}%`,
+        vals,
+        latest < 35 ? 'bull' : latest < 55 ? 'neutral' : 'bear',
+        latest < 35 ? 'Conservative' : latest < 55 ? 'Moderate' : 'Leveraged'
+      )
+    );
+  }
+
+  const liabilitiesAssetsRow = findRowAny(
+    ratios,
+    'Pasivo total / Activo total',
+    'Total Liabilities / Total Assets'
+  );
+  if (liabilitiesAssetsRow) {
+    const vals = getRecentValues(liabilitiesAssetsRow, 8);
+    const latest = vals[vals.length - 1];
+    debtItems.push(
+      makeItem(
+        'Total Liabilities / Total Assets',
+        `Latest: ${latest?.toFixed(1)}%`,
+        vals,
+        latest < 55 ? 'bull' : latest < 70 ? 'neutral' : 'bear',
+        latest < 55 ? 'Asset-backed' : latest < 70 ? 'Balanced' : 'Liability Heavy'
       )
     );
   }
@@ -2814,6 +2872,82 @@ export function analyze(data, profile = 'default', options = {}) {
         )
       );
     }
+  }
+
+  const ebitdaMinusCapexCovRow = findRowAny(
+    ratios,
+    '(EBITDA - Capex) / Gastos por intereses',
+    '(EBITDA - Capex) / Interest Expense'
+  );
+  if (ebitdaMinusCapexCovRow) {
+    const vals = getRecentValues(ebitdaMinusCapexCovRow, 6);
+    const latest = vals[vals.length - 1];
+    debtItems.push(
+      makeItem(
+        '(EBITDA - Capex) / Interest',
+        `Latest: ${latest?.toFixed(1)}x`,
+        vals,
+        latest > 8 ? 'bull' : latest > 3 ? 'neutral' : 'bear',
+        latest > 8 ? 'Well Covered' : latest > 3 ? 'Adequate' : 'Risky'
+      )
+    );
+  }
+
+  const ffoDebtRow = findRowAny(
+    ratios,
+    'FFO a deuda total',
+    'FFO to Total Debt'
+  );
+  if (ffoDebtRow) {
+    const vals = getRecentValues(ffoDebtRow, 6);
+    const latest = vals[vals.length - 1];
+    debtItems.push(
+      makeItem(
+        'FFO to Total Debt',
+        `Latest: ${latest?.toFixed(2)}x`,
+        vals,
+        latest > 0.4 ? 'bull' : latest > 0.2 ? 'neutral' : 'bear',
+        latest > 0.4 ? 'Strong Deleveraging Capacity' : latest > 0.2 ? 'Adequate' : 'Weak'
+      )
+    );
+  }
+
+  const totalDebtEbitdaRow = findRowAny(
+    ratios,
+    'Deuda total / EBITDA',
+    'Total Debt / EBITDA'
+  );
+  if (totalDebtEbitdaRow) {
+    const vals = getRecentValues(totalDebtEbitdaRow, 6);
+    const latest = vals[vals.length - 1];
+    debtItems.push(
+      makeItem(
+        'Total Debt / EBITDA',
+        `Latest: ${latest?.toFixed(2)}x`,
+        vals,
+        latest < 2 ? 'bull' : latest < 3.5 ? 'neutral' : 'bear',
+        latest < 2 ? 'Low Leverage' : latest < 3.5 ? 'Manageable' : 'High'
+      )
+    );
+  }
+
+  const netDebtEbitdaCapexRow = findRowAny(
+    ratios,
+    'Deuda Neta / (EBITDA - Capex)',
+    'Net Debt / (EBITDA - Capex)'
+  );
+  if (netDebtEbitdaCapexRow) {
+    const vals = getRecentValues(netDebtEbitdaCapexRow, 6);
+    const latest = vals[vals.length - 1];
+    debtItems.push(
+      makeItem(
+        'Net Debt / (EBITDA - Capex)',
+        `Latest: ${latest?.toFixed(2)}x`,
+        vals,
+        latest < 0 ? 'bull' : latest < 2.5 ? 'neutral' : 'bear',
+        latest < 0 ? 'Net Cash' : latest < 2.5 ? 'Comfortable' : 'Stretched'
+      )
+    );
   }
 
   const cashAssetsRow = findRowAny(ratios, 'Cash / Assets');
@@ -3224,6 +3358,92 @@ export function analyze(data, profile = 'default', options = {}) {
     }
   }
 
+  const dpoRow = findRowAny(
+    ratios,
+    'Promedio Días a pagar pendientes',
+    'Days Payable Outstanding',
+    'DPO'
+  );
+  if (dpoRow) {
+    const vals = getRecentValues(dpoRow, 6);
+    const latest = vals[vals.length - 1];
+    if (latest !== null) {
+      effItems.push(
+        makeItem(
+          'Days Payable Outstanding (DPO)',
+          `Latest: ${latest?.toFixed(0)} days`,
+          vals,
+          latest > 60 ? 'bull' : latest > 35 ? 'neutral' : 'bear',
+          latest > 75 ? 'Strong Supplier Float' : latest > 35 ? 'Normal' : 'Low Payables Float'
+        )
+      );
+    }
+  }
+
+  const fixedAssetsTurnoverRow = findRowAny(
+    ratios,
+    'Rotación de activo fijo',
+    'Fixed Assets Turnover'
+  );
+  if (fixedAssetsTurnoverRow) {
+    const vals = getRecentValues(fixedAssetsTurnoverRow, 6);
+    const latest = vals[vals.length - 1];
+    const trend = getTrend(vals);
+    if (latest !== null) {
+      effItems.push(
+        makeItem(
+          'Fixed Assets Turnover',
+          `Latest: ${latest?.toFixed(2)}x — Trend: ${trend}`,
+          vals,
+          latest > 4 ? 'bull' : latest > 2 ? 'neutral' : 'bear',
+          latest > 6 ? 'Very Efficient' : latest > 4 ? 'Efficient' : latest > 2 ? 'Moderate' : 'Underutilized'
+        )
+      );
+    }
+  }
+
+  const wcTurnoverRow = findRowAny(
+    ratios,
+    'Rotación del capital circulante',
+    'Working Capital Turnover'
+  );
+  if (wcTurnoverRow) {
+    const vals = getRecentValues(wcTurnoverRow, 6);
+    const latest = vals[vals.length - 1];
+    if (latest !== null) {
+      effItems.push(
+        makeItem(
+          'Working Capital Turnover',
+          `Latest: ${latest?.toFixed(2)}x`,
+          vals,
+          latest > 8 ? 'bull' : latest > 3 ? 'neutral' : 'bear',
+          latest > 8 ? 'High Throughput' : latest > 3 ? 'Adequate' : 'Heavy Working Capital'
+        )
+      );
+    }
+  }
+
+  const cfoToCurrentLiabRow = findRowAny(
+    ratios,
+    'Flujo de caja operativo a pasivo corriente',
+    'Operating Cash Flow to Current Liabilities'
+  );
+  if (cfoToCurrentLiabRow) {
+    const vals = getRecentValues(cfoToCurrentLiabRow, 6);
+    const latest = vals[vals.length - 1];
+    if (latest !== null) {
+      effItems.push(
+        makeItem(
+          'Operating Cash Flow / Current Liabilities',
+          `Latest: ${latest?.toFixed(2)}x`,
+          vals,
+          latest > 1 ? 'bull' : latest > 0.6 ? 'neutral' : 'bear',
+          latest > 1 ? 'Self-funded Current Liabilities' : latest > 0.6 ? 'Acceptable' : 'Thin Coverage'
+        )
+      );
+    }
+  }
+
   const salesEmpRow = findRowAny(
     ratios,
     'Sales Per Employee',
@@ -3296,6 +3516,7 @@ export function analyze(data, profile = 'default', options = {}) {
   const evRow = findRowAny(
     vmOrIS,
     'Valor total de la empresa',
+    'Valor empresarial total',
     'Total Enterprise Value',
     'Enterprise Value',
     'TEV'
@@ -3330,6 +3551,25 @@ export function analyze(data, profile = 'default', options = {}) {
     'NTM P/E',
     'Forward P/E'
   );
+
+  const evRevenueNtmRow = findRowAny(
+    vm,
+    'NTM EV / Revenues',
+    'Valor de empresa / ingresos totales de la empresa NTM'
+  );
+  if (evRevenueNtmRow) {
+    const vals = getRecentValues(evRevenueNtmRow, 8);
+    const latest = vals[vals.length - 1];
+    valItems.push(
+      makeItem(
+        'EV / Revenues (NTM)',
+        `Latest: ${latest?.toFixed(2)}x`,
+        vals,
+        latest < 5 ? 'bull' : latest < 10 ? 'neutral' : 'bear',
+        latest < 5 ? 'Reasonable' : latest < 10 ? 'Growth Premium' : 'Rich'
+      )
+    );
+  }
   if (peRow) {
     const vals = getRecentValues(peRow, 8);
     const latest = vals[vals.length - 1];
@@ -3480,6 +3720,71 @@ export function analyze(data, profile = 'default', options = {}) {
       )
     );
   }
+
+  const mcapFcfNtmRow = findRowAny(
+    vm,
+    'NTM Market Cap / Free Cash Flow'
+  );
+  if (mcapFcfNtmRow) {
+    const vals = getRecentValues(mcapFcfNtmRow, 8);
+    const latest = vals[vals.length - 1];
+    valItems.push(
+      makeItem(
+        'Market Cap / Free Cash Flow (NTM)',
+        `Latest: ${latest?.toFixed(1)}x`,
+        vals,
+        latest < 20 ? 'bull' : latest < 35 ? 'neutral' : 'bear',
+        latest < 20 ? 'Attractive' : latest < 35 ? 'Fair' : 'Demanding'
+      )
+    );
+  }
+
+  const ltmEvRevenueRow = findRowAny(
+    vm,
+    'Valor / ingresos totales de la empresa de LTM',
+    'LTM EV / Revenues'
+  );
+  const ltmEvGpRow = findRowAny(
+    vm,
+    'LTM Total Enterprise Value / Gross Profit'
+  );
+  const ltmEvEbitdaRow = findRowAny(vm, 'LTM Total Enterprise Value / EBITDA');
+  const ltmEvEbitRow = findRowAny(vm, 'LTM Total Enterprise Value / EBIT');
+  const ltmEvUfcfRow = findRowAny(
+    vm,
+    'Valor empresarial total de LTM / Flujo de caja libre sin apalancamiento',
+    'LTM EV / Unlevered Free Cash Flow'
+  );
+  const ltmMcapLfcfRow = findRowAny(
+    vm,
+    'Capitalización de mercado LTM / Flujo de caja libre apalancado',
+    'LTM Market Cap / Levered Free Cash Flow'
+  );
+  const pNcavRow = findRowAny(vm, 'LTM Price / Net Current Asset Value', 'P/NCAV');
+
+  [
+    ['EV / Revenues (LTM)', ltmEvRevenueRow],
+    ['EV / Gross Profit (LTM)', ltmEvGpRow],
+    ['EV / EBITDA (LTM)', ltmEvEbitdaRow],
+    ['EV / EBIT (LTM)', ltmEvEbitRow],
+    ['EV / Unlevered FCF (LTM)', ltmEvUfcfRow],
+    ['Market Cap / Levered FCF (LTM)', ltmMcapLfcfRow],
+    ['Price / NCAV (LTM)', pNcavRow]
+  ].forEach(([name, row]) => {
+    if (!row) return;
+    const vals = getRecentValues(row, 8);
+    const latest = vals[vals.length - 1];
+    if (latest === null || latest === undefined) return;
+    valItems.push(
+      makeItem(
+        String(name),
+        `Latest: ${latest?.toFixed(2)}x`,
+        vals,
+        latest < 15 ? 'bull' : latest < 30 ? 'neutral' : 'bear',
+        latest < 15 ? 'Attractive' : latest < 30 ? 'Fair' : 'Expensive'
+      )
+    );
+  });
 
   const fcfYieldRow = findRowAny(
     vm,
@@ -3915,10 +4220,31 @@ export function analyze(data, profile = 'default', options = {}) {
     // High vs Low targets
     const highRow = findRowAny(
       apt,
+      'Precio de acción objetivo máximo',
       'Precio objetivo alto',
       'High Price Target'
     );
-    const lowRow = findRowAny(apt, 'Precio objetivo bajo', 'Low Price Target');
+    const lowRow = findRowAny(
+      apt,
+      'Precio de acción objetivo mínimo',
+      'Precio objetivo bajo',
+      'Low Price Target'
+    );
+    const medianRow = findRowAny(
+      apt,
+      'Mediana de precio de acción objetivo',
+      'Median Price Target'
+    );
+    const estimateCountRow = findRowAny(
+      apt,
+      'Precio de acción objetivo (# est.)',
+      '# Estimates'
+    );
+    const targetToPriceRow = findRowAny(
+      apt,
+      'Precio de acción objetivo / Precio de cierre',
+      'Target / Price'
+    );
     if (highRow && lowRow) {
       const high = getLatest(highRow);
       const low = getLatest(lowRow);
@@ -3935,6 +4261,51 @@ export function analyze(data, profile = 'default', options = {}) {
               : spread < 100
                 ? 'Moderate Spread'
                 : 'Wide Disagreement'
+          )
+        );
+      }
+    }
+
+    if (medianRow) {
+      const median = getLatest(medianRow);
+      if (median) {
+        analystItems.push(
+          makeItem(
+            'Median Price Target',
+            `Latest median target: $${median.toFixed(0)}`,
+            getRecentValues(medianRow, 6),
+            'info',
+            'Reference'
+          )
+        );
+      }
+    }
+
+    if (estimateCountRow) {
+      const estCount = getLatest(estimateCountRow);
+      if (estCount) {
+        analystItems.push(
+          makeItem(
+            'Target Coverage (# Estimates)',
+            `Latest coverage: ${estCount.toFixed(0)} analysts`,
+            getRecentValues(estimateCountRow, 6),
+            estCount >= 20 ? 'bull' : estCount >= 10 ? 'neutral' : 'neutral',
+            estCount >= 20 ? 'Well-covered' : estCount >= 10 ? 'Moderately covered' : 'Low coverage'
+          )
+        );
+      }
+    }
+
+    if (targetToPriceRow) {
+      const ratioPct = getLatest(targetToPriceRow);
+      if (ratioPct) {
+        analystItems.push(
+          makeItem(
+            'Target / Price (%)',
+            `Latest: ${ratioPct.toFixed(1)}%`,
+            getRecentValues(targetToPriceRow, 6),
+            ratioPct > 110 ? 'bull' : ratioPct > 95 ? 'neutral' : 'bear',
+            ratioPct > 110 ? 'Strong implied upside' : ratioPct > 95 ? 'Balanced' : 'Potential downside'
           )
         );
       }
