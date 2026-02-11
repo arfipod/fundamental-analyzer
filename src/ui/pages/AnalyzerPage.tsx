@@ -8,6 +8,7 @@ import {
 } from '../../domain/metrics/scoring';
 import { useAnalyzer } from '../hooks/useAnalyzer';
 import { useI18n } from '../hooks/useI18n';
+import appleTestData from '../../../test-data/apple.md?raw';
 
 export function AnalyzerPage() {
   const { lang, t, changeLanguage } = useI18n();
@@ -17,7 +18,7 @@ export function AnalyzerPage() {
     () => [...GICS_INDUSTRIES].sort((a, b) => a.name.localeCompare(b.name)),
     []
   );
-  const [industry, setIndustry] = useState(sortedIndustries[0]?.code ?? '');
+  const [industry, setIndustry] = useState('');
   const [industryQuery, setIndustryQuery] = useState('');
   const [includeAnalystNoise, setIncludeAnalystNoise] = useState(false);
 
@@ -32,7 +33,7 @@ export function AnalyzerPage() {
   }, [industryQuery, sortedIndustries]);
 
   useEffect(() => {
-    if (filteredIndustries.length > 0) {
+    if (industry && filteredIndustries.length > 0) {
       const selectedStillVisible = filteredIndustries.some(
         (item) => item.code === industry
       );
@@ -124,6 +125,9 @@ export function AnalyzerPage() {
                 value={industry}
                 onChange={(e) => setIndustry(e.target.value)}
               >
+                <option value="">
+                  {lang === 'es' ? '-- Ninguna --' : '-- None --'}
+                </option>
                 {filteredIndustries.map((item) => (
                   <option
                     key={item.code}
@@ -158,14 +162,22 @@ export function AnalyzerPage() {
               </label>
             </div>
             <div style={{ display: 'flex', justifyContent: 'center' }}>
-              <button
-                className="btn-analyze"
-                onClick={() =>
-                  analyze(raw, includeAnalystNoise, industry, lang)
-                }
-              >
-                {t('analyze')}
-              </button>
+              <div className="landing-actions">
+                <button
+                  className="btn-secondary"
+                  onClick={() => setRaw(appleTestData)}
+                >
+                  {t('loadDemoData')}
+                </button>
+                <button
+                  className="btn-analyze"
+                  onClick={() =>
+                    analyze(raw, includeAnalystNoise, industry, lang)
+                  }
+                >
+                  {t('analyze')}
+                </button>
+              </div>
             </div>
             {error ? (
               <div id="error-msg" style={{ display: 'block' }}>

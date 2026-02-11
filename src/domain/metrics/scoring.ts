@@ -224,7 +224,7 @@ function normalizeLabelText(label) {
     const re = new RegExp(wrong, 'gi');
     out = out.replace(re, ok);
   });
-  return out.replace(/\s+/g, ' ').trim();
+  return out.replace(/%\s+\)/g, '%)').replace(/\s+/g, ' ').trim();
 }
 
 const FINANCIAL_LABEL_NORMALIZED = Object.fromEntries(
@@ -507,6 +507,8 @@ const DYNAMIC_I18N = {
     'Acquisition-heavy': 'Intensiva en adquisiciones',
     'debt paydown': 'amortización de deuda',
     'cash build': 'aumento/acumulación de caja',
+    'FCF used for': 'FCF destinado a',
+    '% of FCF': '% del FCF',
     buybacks: 'recompras',
     dividends: 'dividendos',
     EPS: 'BPA (beneficio por acción)',
@@ -600,6 +602,259 @@ function splitMarkdownRow(row) {
   // remove leading/trailing empty cell due to leading/trailing pipe
   return cells.filter((c, i) => i > 0 && i < cells.length - 1);
 }
+
+function splitDelimitedRow(row, delimiter) {
+  const cells = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < row.length; i++) {
+    const ch = row[i];
+    if (ch === '"') {
+      if (inQuotes && row[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (ch === delimiter && !inQuotes) {
+      cells.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
+function detectCsvDelimiter(line) {
+  let commas = 0;
+  let semicolons = 0;
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (!inQuotes && ch === ',') commas++;
+    if (!inQuotes && ch === ';') semicolons++;
+  }
+  return semicolons > commas ? ';' : ',';
+}
+
+function looksLikeFinancialCsv(lines) {
+  if (!lines.length) return false;
+  const first = lines[0] || '';
+  if (!first || first.startsWith('|')) return false;
+  const delimiter = detectCsvDelimiter(first);
+  const cols = splitDelimitedRow(first, delimiter).map((c) =>
+    c.replace(/^"|"$/g, '').trim()
+  );
+  if (cols.length < 3) return false;
+  const firstCol = cols[0].toLowerCase();
+  if (
+    !['date', 'datetime', 'fecha', 'periodo', 'period'].some((k) =>
+      firstCol.includes(k)
+    )
+  )
+    return false;
+  return cols.slice(1).some((c) => c.length > 0);
+}
+
+const SECTION_HINTS = {
+  'Income Statement': [
+    'revenue',
+    'ingresos',
+    'cost of goods sold',
+    'gross profit',
+    'operating income',
+    'ebit',
+    'ebitda',
+    'eps',
+    'tax',
+    'beneficio',
+    'gastos',
+    'marg',
+    'dividend'
+  ],
+  'Balance Sheet': [
+    'asset',
+    'liabil',
+    'equity',
+    'debt',
+    'cash and equivalents',
+    'invent',
+    'receivable',
+    'payable',
+    'activo',
+    'pasivo',
+    'patrimonio',
+    'deuda',
+    'efectivo'
+  ],
+  'Cash Flow': [
+    'cash flow',
+    'operating cash',
+    'capital expenditure',
+    'free cash flow',
+    'stock based compensation',
+    'depreciation',
+    'flujo de caja',
+    'capex',
+    'depreciación'
+  ],
+  Ratios: [
+    'ratio',
+    '% change',
+    'margin',
+    'return on',
+    'payout',
+    'cagr',
+    'margen',
+    'cambio yoy',
+    'yoy'
+  ],
+  'Valuation Multiples': [
+    'market cap',
+    'ev/',
+    'p/e',
+    'price close',
+    'valuation',
+    'capitalización',
+    'precio'
+  ],
+  'Consensus Estimates': ['estimate', 'consensus', 'estimación', 'consenso']
+};
+
+function inferSectionFromHeaders(headers) {
+  const scores = Object.fromEntries(
+    Object.keys(SECTION_HINTS).map((section) => [section, 0])
+  );
+  headers.forEach((h) => {
+    const normalized = normalizeLabelText(h).toLowerCase();
+    Object.entries(SECTION_HINTS).forEach(([section, hints]) => {
+      if (hints.some((hint) => normalized.includes(hint))) scores[section] += 1;
+    });
+  });
+  let bestSection = 'Income Statement';
+  let bestScore = -1;
+  Object.entries(scores).forEach(([section, score]) => {
+    if (score > bestScore) {
+      bestSection = section;
+      bestScore = score;
+    }
+  });
+  return bestSection;
+}
+
+function parseCsvFinancialInput(lines, data) {
+  const delimiter = detectCsvDelimiter(lines[0]);
+  const header = splitDelimitedRow(lines[0], delimiter).map((c) =>
+    c.replace(/^"|"$/g, '').trim()
+  );
+  if (header.length < 2) return false;
+
+  const metricHeaders = header.slice(1);
+  const dates = [];
+  const matrix = [];
+
+  for (const line of lines.slice(1)) {
+    const cells = splitDelimitedRow(line, delimiter).map((c) =>
+      c.replace(/^"|"$/g, '').trim()
+    );
+    if (cells.length < 2) continue;
+    const rowDate = cells[0];
+    if (!rowDate) continue;
+    dates.push(rowDate);
+    matrix.push(cells);
+  }
+
+  if (!dates.length) return false;
+
+  const rows = metricHeaders.map((label, metricIdx) => {
+    const rawLabel = normalizeLabelText(label);
+    const cLabel = canonicalizeFinancialLabel(rawLabel);
+    const values = matrix.map((row) => row[metricIdx + 1] || '');
+    return {
+      label: cLabel.canonicalEn,
+      rawLabel,
+      displayLabel: cLabel.es,
+      labelNormalized: cLabel.normalized,
+      values,
+      dates
+    };
+  });
+
+  const sectionName = inferSectionFromHeaders(metricHeaders);
+  data.sections[sectionName] = { dates, rows };
+  return true;
+}
+
+function detectSectionFromMarkdownHeader(rawLabel) {
+  const normalized = normalizeLabelText(rawLabel).toLowerCase();
+  if (
+    normalized.includes('income statement') ||
+    normalized.includes('cuenta de resultados')
+  )
+    return 'Income Statement';
+  if (
+    normalized.includes('balance sheet') ||
+    normalized.includes('balance general') ||
+    normalized.includes('estado de situación')
+  )
+    return 'Balance Sheet';
+  if (
+    normalized.includes('cash flow') ||
+    normalized.includes('flujo de caja')
+  )
+    return 'Cash Flow';
+  if (normalized.includes('ratios') || normalized.includes('ratio'))
+    return 'Ratios';
+  return null;
+}
+
+function parseMarkdownSectionRows(rows) {
+  const parsed = [];
+  let dates = [];
+  for (const row of rows) {
+    const cells = splitMarkdownRow(row);
+    if (cells.length < 2) continue;
+    if (cells[0] === '---' || cells.every((c) => c === '---' || c === ''))
+      continue;
+    const rawLabel = normalizeLabelText(cells[0]);
+    if (
+      (rawLabel.includes('TIKR') ||
+        rawLabel.includes('Cuenta') ||
+        rawLabel.includes('Balance') ||
+        rawLabel.includes('Cash Flow') ||
+        rawLabel.includes('Ratios') ||
+        rawLabel.includes('Múltiplos') ||
+        rawLabel.includes('Objetivos') ||
+        rawLabel.includes('Estimaciones')) &&
+      cells.some((c) => c.match(/\d{2}\/\d{2}\/\d{2}/))
+    ) {
+      dates = cells.slice(1).map((c) => c.replace('TIKR.com', '').trim());
+      continue;
+    }
+    if (rawLabel === 'TIKR.com' || rawLabel === '---') continue;
+    const cLabel = canonicalizeFinancialLabel(rawLabel);
+    const values = cells.slice(1);
+    parsed.push({
+      label: cLabel.canonicalEn,
+      rawLabel,
+      displayLabel: cLabel.es,
+      labelNormalized: cLabel.normalized,
+      values,
+      dates
+    });
+  }
+  return { dates, rows: parsed };
+}
+
 export function parseTIKR(raw) {
   const lines = raw
     .split('\n')
@@ -615,6 +870,11 @@ export function parseTIKR(raw) {
     sections: {}
   };
   const firstLineRaw = (lines[0] || '').replace(/^#+\s*/, '').trim();
+
+  if (looksLikeFinancialCsv(lines)) {
+    const csvData = parseCsvFinancialInput(lines, data);
+    if (csvData) return data;
+  }
 
   let ticker = '';
   let company = '';
@@ -685,41 +945,40 @@ export function parseTIKR(raw) {
   }
 
   for (const [secName, rows] of Object.entries(sectionLines)) {
-    const parsed = [];
-    let dates = [];
-    for (const row of rows) {
+    data.sections[secName] = parseMarkdownSectionRows(rows);
+  }
+
+  // Fallback: parse standalone markdown tables even without explicit section headings.
+  if (!Object.keys(data.sections).length) {
+    const markdownRows = lines.filter((l) => l.startsWith('|'));
+    const blocks = [];
+    let currentBlock = [];
+
+    for (const row of markdownRows) {
       const cells = splitMarkdownRow(row);
-      if (cells.length < 2) continue;
-      if (cells[0] === '---' || cells.every((c) => c === '---' || c === ''))
-        continue;
-      const rawLabel = normalizeLabelText(cells[0]);
-      if (
-        (rawLabel.includes('TIKR') ||
-          rawLabel.includes('Cuenta') ||
-          rawLabel.includes('Balance') ||
-          rawLabel.includes('Cash Flow') ||
-          rawLabel.includes('Ratios') ||
-          rawLabel.includes('Múltiplos') ||
-          rawLabel.includes('Objetivos') ||
-          rawLabel.includes('Estimaciones')) &&
-        cells.some((c) => c.match(/\d{2}\/\d{2}\/\d{2}/))
-      ) {
-        dates = cells.slice(1).map((c) => c.replace('TIKR.com', '').trim());
+      if (!cells.length) continue;
+
+      const isTitleRow =
+        detectSectionFromMarkdownHeader(cells[0]) &&
+        cells.some((c) => c.match(/\d{2}\/\d{2}\/\d{2}/));
+
+      if (isTitleRow && currentBlock.length) {
+        blocks.push(currentBlock);
+        currentBlock = [row];
         continue;
       }
-      if (rawLabel === 'TIKR.com' || rawLabel === '---') continue;
-      const cLabel = canonicalizeFinancialLabel(rawLabel);
-      const values = cells.slice(1);
-      parsed.push({
-        label: cLabel.canonicalEn,
-        rawLabel,
-        displayLabel: cLabel.es,
-        labelNormalized: cLabel.normalized,
-        values,
-        dates
-      });
+
+      currentBlock.push(row);
     }
-    data.sections[secName] = { dates, rows: parsed };
+
+    if (currentBlock.length) blocks.push(currentBlock);
+
+    for (const block of blocks) {
+      const firstCells = splitMarkdownRow(block[0] || '');
+      const sectionHint = detectSectionFromMarkdownHeader(firstCells[0] || '');
+      if (!sectionHint) continue;
+      data.sections[sectionHint] = parseMarkdownSectionRows(block);
+    }
   }
   return data;
 }
@@ -729,12 +988,16 @@ export function parseTIKR(raw) {
 // =========================================================
 function getRecentValues(row, n = 5) {
   if (!row) return [];
-  const mapped = row.values
-    .map((v, i) => ({ value: parseNumber(v), label: row.dates?.[i] || '' }))
-    .filter((x) => x.value !== null);
-  const sliced = mapped.slice(-n);
-  const vals = sliced.map((x) => x.value);
-  vals.labels = sliced.map((x) => x.label);
+  const mapped = row.values.map((v, i) => ({
+    value: parseNumber(v),
+    label: row.dates?.[i] || ''
+  }));
+  const slicedAll = mapped.slice(-n);
+  const slicedNumeric = slicedAll.filter((x) => x.value !== null);
+  const vals = slicedNumeric.map((x) => x.value);
+  vals.labels = slicedNumeric.map((x) => x.label);
+  vals.fullValues = slicedAll.map((x) => x.value);
+  vals.fullLabels = slicedAll.map((x) => x.label);
   return vals;
 }
 
@@ -1491,7 +1754,7 @@ export function analyze(data, profile = 'default', options = {}) {
         makeItem(
           'Operating Leverage',
           `Gross Δ: ${grossDelta > 0 ? '+' : ''}${grossDelta.toFixed(1)}pp | Op Δ: ${opDelta > 0 ? '+' : ''}${opDelta.toFixed(1)}pp`,
-          [],
+          opVals,
           expanding ? 'bull' : opDelta > 0 ? 'neutral' : 'bear',
           expanding
             ? 'Positive Leverage'
@@ -3672,7 +3935,7 @@ export function analyze(data, profile = 'default', options = {}) {
   const niY = yoyGrowth(niVals).slice(-1)[0];
   const epsY = yoyGrowth(epsVals).slice(-1)[0];
   const earnY = niY ?? epsY;
-  if (revY !== null && earnY !== null) {
+  if (Number.isFinite(revY) && Number.isFinite(earnY)) {
     const bearish = revY > 4 && earnY < -4;
     harmonyItems.push(
       makeItem(
@@ -3882,7 +4145,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (invVals2.length >= 2 && revVals.length >= 2) {
     const invY = yoyGrowth(invVals2).slice(-1)[0];
     const revYY = yoyGrowth(revVals).slice(-1)[0];
-    if (invY !== null && revYY !== null) {
+    if (Number.isFinite(invY) && Number.isFinite(revYY)) {
       const spread = invY - revYY;
       balanceItems.push(
         makeItem(
@@ -4027,10 +4290,20 @@ export function analyze(data, profile = 'default', options = {}) {
       findRowAny(cf, 'Net Change in Cash', 'Variación neta de tesorería')
     ) || 0;
   if (fcfComputed !== null) {
+    const fcfAbs = Math.abs(fcfComputed);
+    const toPctOfFcf = (value) => {
+      if (fcfAbs === 0) return null;
+      return (value / fcfAbs) * 100;
+    };
+    const formatUseLine = (label, amount) => {
+      const pct = toPctOfFcf(amount);
+      return `${label} ${amount.toFixed(0)}${pct === null ? '' : ` (${pct.toFixed(1)}%)`}`;
+    };
+
     truthItems.push(
       makeItem(
         'FCF Uses Summary',
-        `FCF used for buybacks ${buyback.toFixed(0)}, dividends ${divPaid.toFixed(0)}, debt paydown ${debtRepay.toFixed(0)}, cash build ${cashBuild.toFixed(0)}`,
+        `FCF total ${fcfComputed.toFixed(0)}; FCF used for ${formatUseLine('buybacks', buyback)}, ${formatUseLine('dividends', divPaid)}, ${formatUseLine('debt paydown', debtRepay)}, ${formatUseLine('cash build', cashBuild)}`,
         [fcfComputed],
         fcfComputed < 0 && buyback + divPaid > 0 ? 'bear' : 'neutral',
         fcfComputed < 0 && buyback + divPaid > 0
@@ -4221,26 +4494,97 @@ function gradeEmoji(g) {
   return { excellent: '🟢', good: '🔵', average: '🟡', poor: '🔴' }[g] || '⚪';
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function buildPrintableDashboardPanel(data, results, industrySelection = null) {
+  const sectionBlocks = (results.sections || [])
+    .map((section) => {
+      const sectionTitle = `${section.icon || '•'} ${localizeDynamicText(section.title || '')}`;
+      const metrics = (section.items || [])
+        .map((item) => {
+          const metricName = localizeDynamicText(item.name || 'Metric');
+          const metricDetail = localizeDynamicText(item.detail || '');
+          const metricValues = localizeDynamicText(item.explanation || '');
+          const signalText = localizeDynamicText(item.signalText || '');
+          const signal =
+            item.signal === 'bull'
+              ? currentLang === 'es'
+                ? '🟢 Positiva'
+                : '🟢 Positive'
+              : item.signal === 'bear'
+                ? currentLang === 'es'
+                  ? '🔴 Negativa'
+                  : '🔴 Negative'
+                : currentLang === 'es'
+                  ? '🟡 Neutral'
+                  : '🟡 Neutral';
+          const note = localizeDynamicText(item.note || '');
+          const value = item.value != null ? ` (${item.value})` : '';
+          return `<li>
+            <strong>${escapeHtml(metricName)}</strong>${escapeHtml(value)}
+            ${metricDetail ? `<br/><span>${escapeHtml(metricDetail)}</span>` : ''}
+            ${metricValues ? `<br/><span>${escapeHtml(metricValues)}</span>` : ''}
+            <br/><span><strong>${escapeHtml(currentLang === 'es' ? 'Señal' : 'Signal')}:</strong> ${escapeHtml(signal)}${signalText ? ` · ${escapeHtml(signalText)}` : ''}</span>
+            ${note ? `<br/><span>${escapeHtml(note)}</span>` : ''}
+          </li>`;
+        })
+        .join('');
+      return `<section><h3>${escapeHtml(sectionTitle)}</h3><ul>${metrics}</ul></section>`;
+    })
+    .join('');
+
+  const scoreLine = `${currentLang === 'es' ? 'Puntuación global' : 'Overall score'}: ${results.overallScore?.toFixed(1) || '-'} / 4.0`;
+  const industryLine = industrySelection
+    ? `${industrySelection.code} · ${industrySelection.name} (${industrySelection.profile})`
+    : currentLang === 'es'
+      ? 'Sin industria seleccionada'
+      : 'No selected industry';
+
+  return `<div class="printable-panel fade-up">
+    <div class="printable-header">
+      <h2>${escapeHtml(data.ticker ? `${data.ticker} — ${data.company}` : data.company)}</h2>
+      <p>${escapeHtml(data.period || '')}</p>
+      <p class="printable-help">${currentLang === 'es' ? 'Vista simplificada para imprimir. Puedes usar la impresión del navegador (Ctrl/Cmd+P).' : 'Simplified print-friendly view. Use your browser print dialog (Ctrl/Cmd+P).'}</p>
+    </div>
+    <div class="printable-summary">
+      <h3>${currentLang === 'es' ? 'Resumen rápido' : 'Quick summary'}</h3>
+      <p>${escapeHtml(scoreLine)}</p>
+      <p>${escapeHtml(currentLang === 'es' ? 'Industria:' : 'Industry:')} ${escapeHtml(industryLine)}</p>
+      <p>${escapeHtml(currentLang === 'es' ? `Métricas analizadas: ${results.totalMetrics}` : `Analyzed metrics: ${results.totalMetrics}`)}</p>
+    </div>
+    ${sectionBlocks}
+  </div>`;
+}
+
 function renderTrendBars(values, labels = []) {
-  if (!values || values.length < 2) return '';
-  const numeric = values.filter(
+  const series = Array.isArray(values) ? values : [];
+  const points = Math.max(series.length, labels.length);
+  if (!points) return '';
+
+  const numeric = series.filter(
     (v) => v !== null && v !== undefined && !isNaN(v)
   );
-  if (!numeric.length) return '';
   const max = Math.max(...numeric.map((v) => Math.abs(v)), 1);
-  return `<div class="trend-bar">${values
-    .map((v, i) => {
+  return `<div class="trend-bar">${Array.from({ length: points }, (_, i) => {
+      const v = series[i];
       if (v === null || v === undefined || isNaN(v))
         return '<div class="bar bar-missing"></div>';
       const h = Math.max(2, (Math.abs(v) / max) * 30);
       const cls = v > 0 ? 'bar-pos' : v < 0 ? 'bar-neg' : 'bar-zero';
       const year = labels[i] || `#${i + 1}`;
       const label = `${year}: ${v.toFixed(2)}`;
-      return `<button type="button" class="bar ${cls}" style="height:${h}px" title="${label}" data-point="${label}" onclick="showBarPoint(this)"></button>`;
+      return `<button type="button" class="bar ${cls}" style="height:${h}px" title="${label}" aria-label="${label}" data-point="${label}"></button>`;
     })
     .join(
       ''
-    )}</div><div class="bar-point-view mono" data-i18n-point>${t('barNoData', 'No data')}</div>`;
+    )}</div>`;
 }
 
 export function renderDashboard(data, results, industrySelection = null) {
@@ -4253,6 +4597,7 @@ export function renderDashboard(data, results, industrySelection = null) {
         <span class="price">${data.price || ''} ${data.period ? '• ' + localizeDynamicText(data.period) : ''} • ${results.totalMetrics} ${t('metricsAnalyzed', 'metrics analyzed')}</span>
       </div>
       <div class="header-actions">
+        <button class="btn-toggle-sections" onclick="switchDashboardTab('print')">${currentLang === 'es' ? '🖨️ Imprimir' : '🖨️ Print'}</button>
         <button id="toggleSectionsBtn" class="btn-toggle-sections" onclick="toggleAllSections()">${t('collapseAll', 'Collapse all sections')}</button>
         <button class="btn-back" onclick="goBack()">${t('newAnalysis', '← New Analysis')}</button>
       </div>
@@ -4260,6 +4605,7 @@ export function renderDashboard(data, results, industrySelection = null) {
     <div class="dashboard-tabs fade-up">
       <button class="dashboard-tab active" data-tab="analysis" onclick="switchDashboardTab('analysis')">${currentLang === 'es' ? 'Análisis' : 'Analysis'}</button>
       <button class="dashboard-tab" data-tab="industry" onclick="switchDashboardTab('industry')">${currentLang === 'es' ? 'KPIs por industria' : 'Industry KPIs'}</button>
+      <button class="dashboard-tab" data-tab="print" onclick="switchDashboardTab('print')">${currentLang === 'es' ? '🖨️ Imprimible' : '🖨️ Printable'}</button>
     </div>
     <div class="dashboard-panel" data-panel="analysis">
   `;
@@ -4359,7 +4705,7 @@ export function renderDashboard(data, results, industrySelection = null) {
             <div class="metric-detail">${localizeDynamicText(item.detail || '')}</div>
             ${item.explanation ? `<div class="metric-values">${localizeDynamicText(item.explanation)}</div>` : ''}
             <div class="metric-values">${t('confidence', 'Confidence')}: ${(item.confidence * 100).toFixed(0)}%</div>
-            ${renderTrendBars(item.values, item.labels || [])}
+            ${renderTrendBars(item.values?.fullValues || item.values, item.values?.fullLabels || item.labels || [])}
           </div>
           <div class="signal ${sigCls}">
             <span class="dot ${dotCls}"></span>
@@ -4372,14 +4718,8 @@ export function renderDashboard(data, results, industrySelection = null) {
   });
 
   html += buildSummary(data, results);
-  html += `</div><div class="dashboard-panel" data-panel="industry" style="display:none">${buildIndustryPanel(data, results, industrySelection)}</div>`;
+  html += `</div><div class="dashboard-panel" data-panel="industry" style="display:none">${buildIndustryPanel(data, results, industrySelection)}</div><div class="dashboard-panel" data-panel="print" style="display:none">${buildPrintableDashboardPanel(data, results, industrySelection)}</div>`;
   return html;
-}
-
-function showBarPoint(el) {
-  const value = el?.dataset?.point || t('barNoData', 'No data');
-  const container = el.closest('.a-item')?.querySelector('[data-i18n-point]');
-  if (container) container.textContent = value;
 }
 
 export function updateToggleSectionsButton() {
