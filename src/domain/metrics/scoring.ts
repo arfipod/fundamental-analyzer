@@ -4479,14 +4479,16 @@ function gradeEmoji(g) {
 }
 
 function renderTrendBars(values, labels = []) {
-  if (!values || values.length < 2) return '';
-  const numeric = values.filter(
+  const series = Array.isArray(values) ? values : [];
+  const points = Math.max(series.length, labels.length);
+  if (!points) return '';
+
+  const numeric = series.filter(
     (v) => v !== null && v !== undefined && !isNaN(v)
   );
-  if (!numeric.length) return '';
   const max = Math.max(...numeric.map((v) => Math.abs(v)), 1);
-  return `<div class="trend-bar">${values
-    .map((v, i) => {
+  return `<div class="trend-bar">${Array.from({ length: points }, (_, i) => {
+      const v = series[i];
       if (v === null || v === undefined || isNaN(v))
         return '<div class="bar bar-missing"></div>';
       const h = Math.max(2, (Math.abs(v) / max) * 30);
