@@ -3,6 +3,18 @@ import { describe, expect, it } from 'vitest';
 
 import { renderDashboard, analyze, setLanguage } from './scoring';
 
+type MetricItem = {
+  name?: string;
+  values?: {
+    fullValues?: Array<number | null>;
+  };
+};
+
+type ResultSection = {
+  id?: string;
+  items: MetricItem[];
+};
+
 function makeResults(itemOverrides: Record<string, unknown>) {
   return {
     overall: 'good',
@@ -108,13 +120,16 @@ describe('renderDashboard trend bars', () => {
       }
     };
 
-    const results = analyze(data, 'default', { includeAnalystNoise: false });
-    const margins = results.sections.find((s: { id?: string }) => s.id === 'margins');
+    const results = analyze(data, 'default', {
+      includeAnalystNoise: false
+    }) as { sections: ResultSection[] };
+    const margins = results.sections.find((s) => s.id === 'margins');
     const opLeverage = margins?.items.find(
-      (item: { name?: string }) => item.name === 'Operating Leverage'
+      (item) => item.name === 'Operating Leverage'
     );
 
     expect(opLeverage).toBeTruthy();
+    if (!opLeverage) throw new Error('Operating Leverage metric not found');
     expect(opLeverage.values?.fullValues).toEqual([30, 31, null, 33]);
 
     const html = renderDashboard(data, results, null);
