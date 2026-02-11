@@ -2,6 +2,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 
+type ParsedRow = {
+  label: string;
+  values: string[];
+};
+
+type ParsedSection = {
+  dates: string[];
+  rows: ParsedRow[];
+};
+
+type ParsedInput = {
+  sections?: Record<string, ParsedSection>;
+};
+
 class MemoryStorage {
   private data = new Map<string, string>();
   getItem(key: string): string | null {
@@ -38,7 +52,7 @@ describe('analysis pipeline', () => {
       'utf8'
     );
 
-    const parsed = parseInput(fixture);
+    const parsed = parseInput(fixture) as ParsedInput;
     const results = runAnalysis(parsed, 'default', {
       includeAnalystNoise: false
     });
@@ -53,7 +67,7 @@ describe('analysis pipeline', () => {
 
     const csv = `Date,Revenues,Operating Income,Net Income,Effective Tax Rate %\n2023-05-31,49954,13670,8503,6.8266\n2024-05-31,52961,15764,10467,10.8508\n2025-05-31,57399,17954,12443,12.1257`;
 
-    const parsed = parseInput(csv);
+    const parsed = parseInput(csv) as ParsedInput;
     const incomeStatement = parsed.sections?.['Income Statement'];
 
     expect(incomeStatement).toBeTruthy();
@@ -62,11 +76,13 @@ describe('analysis pipeline', () => {
       '2024-05-31',
       '2025-05-31'
     ]);
-    expect(incomeStatement?.rows.some((r) => r.label === 'Revenues')).toBe(
+    expect(
+      incomeStatement?.rows.some((r: ParsedRow) => r.label === 'Revenues')
+    ).toBe(
       true
     );
     expect(
-      incomeStatement?.rows.some((r) => r.label === 'Operating Income')
+      incomeStatement?.rows.some((r: ParsedRow) => r.label === 'Operating Income')
     ).toBe(true);
   });
 
@@ -75,15 +91,15 @@ describe('analysis pipeline', () => {
 
     const csv = `"DateTime";"Ingresos";"Beneficio operativo";"Tasa efectiva de impuestos %"\n"2023-05-31 00:00:00";49954;13670;6,8266\n"2024-05-31 00:00:00";52961;15764;10,8508`;
 
-    const parsed = parseInput(csv);
+    const parsed = parseInput(csv) as ParsedInput;
     const incomeStatement = parsed.sections?.['Income Statement'];
 
     expect(incomeStatement).toBeTruthy();
-    const revenueRow = incomeStatement?.rows.find((r) =>
+    const revenueRow = incomeStatement?.rows.find((r: ParsedRow) =>
       r.label === 'Revenues' || r.label === 'Ingresos'
     );
     const taxRateRow = incomeStatement?.rows.find(
-      (r) =>
+      (r: ParsedRow) =>
         r.label === 'Effective Tax Rate %' ||
         r.label === 'Tasa efectiva de impuestos %'
     );
