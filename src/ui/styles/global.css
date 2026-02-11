@@ -152,6 +152,13 @@ body {
   font-size: 0.85rem;
 }
 
+.app-footer {
+  padding: 0 1.5rem 1.25rem;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
 /* DASHBOARD */
 #dashboard {
   display: none;
