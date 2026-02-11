@@ -714,6 +714,9 @@ body {
   .app-footer {
     display: none !important;
   }
+  .printable-help {
+    display: none !important;
+  }
   .dashboard-panel[data-panel='print'] {
     display: block !important;
   }
