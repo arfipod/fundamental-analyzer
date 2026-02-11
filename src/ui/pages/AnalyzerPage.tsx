@@ -33,7 +33,9 @@ export function AnalyzerPage() {
 
   useEffect(() => {
     if (filteredIndustries.length > 0) {
-      const selectedStillVisible = filteredIndustries.some((item) => item.code === industry);
+      const selectedStillVisible = filteredIndustries.some(
+        (item) => item.code === industry
+      );
       if (!selectedStillVisible) {
         setIndustry(filteredIndustries[0].code);
       }
@@ -123,7 +125,10 @@ export function AnalyzerPage() {
                 onChange={(e) => setIndustry(e.target.value)}
               >
                 {filteredIndustries.map((item) => (
-                  <option key={item.code} value={item.code}>{`${item.name} (${item.code})`}</option>
+                  <option
+                    key={item.code}
+                    value={item.code}
+                  >{`${item.name} (${item.code})`}</option>
                 ))}
               </select>
             </div>
@@ -155,7 +160,9 @@ export function AnalyzerPage() {
             <div style={{ display: 'flex', justifyContent: 'center' }}>
               <button
                 className="btn-analyze"
-                onClick={() => analyze(raw, includeAnalystNoise, industry, lang)}
+                onClick={() =>
+                  analyze(raw, includeAnalystNoise, industry, lang)
+                }
               >
                 {t('analyze')}
               </button>
@@ -176,6 +183,7 @@ export function AnalyzerPage() {
           dangerouslySetInnerHTML={{ __html: dashboardHtml }}
         />
       )}
+      <footer className="app-footer">Made with 💙 by arrf</footer>
     </>
   );
 }

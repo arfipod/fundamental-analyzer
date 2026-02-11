@@ -57,7 +57,11 @@ export function useAnalyzer() {
       const engineProfile = industrySelection?.profile ?? 'default';
 
       const results = runAnalysis(data, engineProfile, options);
-      const html = renderDashboardTyped(data, results, industrySelection ?? undefined);
+      const html = renderDashboardTyped(
+        data,
+        results,
+        industrySelection ?? undefined
+      );
       setDashboardHtml(buildScorecard(html).dashboardHtml);
     } catch (err) {
       console.error(err);
@@ -72,7 +76,13 @@ export function useAnalyzer() {
   const clear = () => setDashboardHtml('');
 
   return useMemo(
-    () => ({ analyze, dashboardHtml, hasDashboard: Boolean(dashboardHtml), error, clear }),
+    () => ({
+      analyze,
+      dashboardHtml,
+      hasDashboard: Boolean(dashboardHtml),
+      error,
+      clear
+    }),
     [dashboardHtml, error]
   );
 }

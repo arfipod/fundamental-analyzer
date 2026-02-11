@@ -2,14 +2,18 @@
 export const I18N = {
   es: {
     appTitle: 'Fundamental Analyzer',
-    subtitle: 'Pega los datos financieros de TIKR y obtén un diagnóstico instantáneo de salud',
+    subtitle:
+      'Pega los datos financieros de TIKR y obtén un diagnóstico instantáneo de salud',
     language: 'Idioma',
     industry: 'Industria GICS',
     analyze: 'Analizar Financieros',
     includeAnalystNoise: 'Incluir ruido de analistas en el resumen',
-    customProfileHint: 'El perfil personalizado sobreescribe solo los umbrales activos.',
-    dataPlaceholder: 'Pega aquí los datos financieros de TIKR...\n\nFormato de ejemplo:\nMEDP – Medpace Holdings, Inc.\nPrice: US$530.35 | Extracted: ...\nPeriod: annual | Sections: 7\n---\nIncome Statement\n| Cuenta de resultados | TIKR.com | 31/12/13 | ...',
-    customJsonPlaceholder: 'JSON de umbrales personalizados, por ejemplo {"gross_margin":{"bull":55,"neutral":35},"roic":{"bull":16,"neutral":9},"opex_gp":{"bull":58,"neutral":72}}',
+    customProfileHint:
+      'El perfil personalizado sobreescribe solo los umbrales activos.',
+    dataPlaceholder:
+      'Pega aquí los datos financieros de TIKR...\n\nFormato de ejemplo:\nMEDP – Medpace Holdings, Inc.\nPrice: US$530.35 | Extracted: ...\nPeriod: annual | Sections: 7\n---\nIncome Statement\n| Cuenta de resultados | TIKR.com | 31/12/13 | ...',
+    customJsonPlaceholder:
+      'JSON de umbrales personalizados, por ejemplo {"gross_margin":{"bull":55,"neutral":35},"roic":{"bull":16,"neutral":9},"opex_gp":{"bull":58,"neutral":72}}',
     'profile.auto': 'Perfil: Auto (inferir)',
     'profile.default': 'Perfil: Estándar',
     'profile.saas': 'Perfil: SaaS / Ligero en activos',
@@ -18,7 +22,11 @@ export const I18N = {
     'profile.financial': 'Perfil: Financieras',
     'profile.utility': 'Perfil: Utility / Telecom',
     'profile.custom': 'Perfil: JSON personalizado',
-    excellent: 'Excelente', good: 'Bueno', average: 'Medio', poor: 'Débil', info: 'Info',
+    excellent: 'Excelente',
+    good: 'Bueno',
+    average: 'Medio',
+    poor: 'Débil',
+    info: 'Info',
     metricsAnalyzed: 'métricas analizadas',
     collapseAll: 'Cerrar todas las secciones',
     openAll: 'Abrir todas las secciones',
@@ -29,14 +37,17 @@ export const I18N = {
   },
   en: {
     appTitle: 'Fundamental Analyzer',
-    subtitle: 'Paste TIKR-format financials below and get an instant health diagnosis',
+    subtitle:
+      'Paste TIKR-format financials below and get an instant health diagnosis',
     language: 'Language',
     industry: 'GICS Industry',
     analyze: 'Analyze Financials',
     includeAnalystNoise: 'Include analyst noise in summary',
     customProfileHint: 'Custom profile overrides active thresholds only.',
-    dataPlaceholder: 'Paste your TIKR financial data here...\n\nExample format:\nMEDP – Medpace Holdings, Inc.\nPrice: US$530.35 | Extracted: ...\nPeriod: annual | Sections: 7\n---\nIncome Statement\n| Income Statement | TIKR.com | 31/12/13 | ...',
-    customJsonPlaceholder: 'Custom thresholds JSON, e.g. {"gross_margin":{"bull":55,"neutral":35},"roic":{"bull":16,"neutral":9},"opex_gp":{"bull":58,"neutral":72}}',
+    dataPlaceholder:
+      'Paste your TIKR financial data here...\n\nExample format:\nMEDP – Medpace Holdings, Inc.\nPrice: US$530.35 | Extracted: ...\nPeriod: annual | Sections: 7\n---\nIncome Statement\n| Income Statement | TIKR.com | 31/12/13 | ...',
+    customJsonPlaceholder:
+      'Custom thresholds JSON, e.g. {"gross_margin":{"bull":55,"neutral":35},"roic":{"bull":16,"neutral":9},"opex_gp":{"bull":58,"neutral":72}}',
     'profile.auto': 'Profile: Auto (infer)',
     'profile.default': 'Profile: Default',
     'profile.saas': 'Profile: SaaS / Asset-light',
@@ -45,7 +56,11 @@ export const I18N = {
     'profile.financial': 'Profile: Financials',
     'profile.utility': 'Profile: Utility / Telecom',
     'profile.custom': 'Profile: Custom JSON',
-    excellent: 'Excellent', good: 'Good', average: 'Average', poor: 'Poor', info: 'Info',
+    excellent: 'Excellent',
+    good: 'Good',
+    average: 'Average',
+    poor: 'Poor',
+    info: 'Info',
     metricsAnalyzed: 'metrics analyzed',
     collapseAll: 'Collapse all sections',
     openAll: 'Open all sections',

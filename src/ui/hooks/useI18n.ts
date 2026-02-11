@@ -8,7 +8,12 @@ export function useI18n() {
     localStorage.getItem(LANGUAGE_KEY) === 'en' ? 'en' : 'es'
   );
 
-  const t = useMemo(() => (key: string, fallback = '') => translate(lang, key, fallback), [lang]);
+  const t = useMemo(
+    () =>
+      (key: string, fallback = '') =>
+        translate(lang, key, fallback),
+    [lang]
+  );
 
   const changeLanguage = (value: string) => {
     const normalized = value === 'en' ? 'en' : 'es';

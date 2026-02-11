@@ -28,7 +28,10 @@ describe('buildDependencies', () => {
     const deps = buildDependencies();
     expect(deps.storage).toBeDefined();
     expect(deps.logger).toBeDefined();
-    const win = window as unknown as { I18N: { en: { appTitle: string } }; GICS_INDUSTRIES: unknown[] };
+    const win = window as unknown as {
+      I18N: { en: { appTitle: string } };
+      GICS_INDUSTRIES: unknown[];
+    };
     expect(win.I18N.en.appTitle).toBe('Fundamental Analyzer');
     expect(Array.isArray(win.GICS_INDUSTRIES)).toBe(true);
   });

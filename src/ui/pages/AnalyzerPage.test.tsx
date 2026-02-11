@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within
+} from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const analyzeSpy = vi.fn();
@@ -50,13 +56,17 @@ describe('AnalyzerPage', () => {
   it('filters industry options by search text', () => {
     render(<AnalyzerPage />);
 
-    const search = screen.getByPlaceholderText('Buscar industria por nombre o código…');
+    const search = screen.getByPlaceholderText(
+      'Buscar industria por nombre o código…'
+    );
     fireEvent.change(search, { target: { value: 'bank' } });
 
     const industrySelect = document.getElementById('industrySelect');
     expect(industrySelect).not.toBeNull();
 
-    const options = within(industrySelect as HTMLElement).getAllByRole('option');
+    const options = within(industrySelect as HTMLElement).getAllByRole(
+      'option'
+    );
     expect(options).toHaveLength(1);
     expect(options[0].textContent).toContain('Banks');
   });
@@ -75,5 +85,11 @@ describe('AnalyzerPage', () => {
     expect(args[0]).toHaveLength(130);
     expect(args[1]).toBe(true);
     expect(args[3]).toBe('es');
+  });
+
+  it('shows footer credit text', () => {
+    render(<AnalyzerPage />);
+
+    expect(screen.getByText('Made with 💙 by arrf')).toBeTruthy();
   });
 });

@@ -3,8 +3,12 @@ import { ConsoleLogger } from './consoleLogger';
 
 describe('ConsoleLogger', () => {
   it('forwards info/error to console', () => {
-    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const infoSpy = vi
+      .spyOn(console, 'info')
+      .mockImplementation(() => undefined);
+    const errorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
 
     const logger = new ConsoleLogger();
     logger.info('hello', { x: 1 });

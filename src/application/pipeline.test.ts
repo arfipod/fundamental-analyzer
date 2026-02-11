@@ -18,7 +18,11 @@ beforeAll(() => {
     configurable: true
   });
   Object.defineProperty(globalThis, 'window', {
-    value: { I18N: { en: {}, es: {} }, GICS_INDUSTRIES: [], INDUSTRY_PROFILES: {} },
+    value: {
+      I18N: { en: {}, es: {} },
+      GICS_INDUSTRIES: [],
+      INDUSTRY_PROFILES: {}
+    },
     configurable: true,
     writable: true
   });
@@ -35,7 +39,9 @@ describe('analysis pipeline', () => {
     );
 
     const parsed = parseInput(fixture);
-    const results = runAnalysis(parsed, 'default', { includeAnalystNoise: false });
+    const results = runAnalysis(parsed, 'default', {
+      includeAnalystNoise: false
+    });
 
     expect(Object.keys(parsed.sections ?? {}).length).toBeGreaterThan(0);
     expect(Object.keys(results.scores ?? {}).length).toBeGreaterThan(0);
