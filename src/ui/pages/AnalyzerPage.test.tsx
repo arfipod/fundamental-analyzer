@@ -42,6 +42,11 @@ vi.mock('../../domain/metrics/scoring', () => ({
   updateToggleSectionsButton: vi.fn()
 }));
 
+
+vi.mock('../../../test-data/apple.md?raw', () => ({
+  default: 'APPLE DEMO CONTENT'
+}));
+
 import { AnalyzerPage } from './AnalyzerPage';
 
 describe('AnalyzerPage', () => {
@@ -69,6 +74,16 @@ describe('AnalyzerPage', () => {
     );
     expect(options).toHaveLength(1);
     expect(options[0].textContent).toContain('Banks');
+  });
+
+
+  it('loads demo data into the textarea', () => {
+    render(<AnalyzerPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'loadDemoData' }));
+
+    const textarea = screen.getByPlaceholderText('dataPlaceholder') as HTMLTextAreaElement;
+    expect(textarea.value).toBe('APPLE DEMO CONTENT');
   });
 
   it('calls analyze with selected controls', () => {

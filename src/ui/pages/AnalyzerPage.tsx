@@ -8,6 +8,7 @@ import {
 } from '../../domain/metrics/scoring';
 import { useAnalyzer } from '../hooks/useAnalyzer';
 import { useI18n } from '../hooks/useI18n';
+import appleTestData from '../../../test-data/apple.md?raw';
 
 export function AnalyzerPage() {
   const { lang, t, changeLanguage } = useI18n();
@@ -158,14 +159,22 @@ export function AnalyzerPage() {
               </label>
             </div>
             <div style={{ display: 'flex', justifyContent: 'center' }}>
-              <button
-                className="btn-analyze"
-                onClick={() =>
-                  analyze(raw, includeAnalystNoise, industry, lang)
-                }
-              >
-                {t('analyze')}
-              </button>
+              <div className="landing-actions">
+                <button
+                  className="btn-secondary"
+                  onClick={() => setRaw(appleTestData)}
+                >
+                  {t('loadDemoData')}
+                </button>
+                <button
+                  className="btn-analyze"
+                  onClick={() =>
+                    analyze(raw, includeAnalystNoise, industry, lang)
+                  }
+                >
+                  {t('analyze')}
+                </button>
+              </div>
             </div>
             {error ? (
               <div id="error-msg" style={{ display: 'block' }}>
