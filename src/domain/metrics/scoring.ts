@@ -224,7 +224,7 @@ function normalizeLabelText(label) {
     const re = new RegExp(wrong, 'gi');
     out = out.replace(re, ok);
   });
-  return out.replace(/\s+/g, ' ').trim();
+  return out.replace(/%\s+\)/g, '%)').replace(/\s+/g, ' ').trim();
 }
 
 const FINANCIAL_LABEL_NORMALIZED = Object.fromEntries(
@@ -507,6 +507,8 @@ const DYNAMIC_I18N = {
     'Acquisition-heavy': 'Intensiva en adquisiciones',
     'debt paydown': 'amortización de deuda',
     'cash build': 'aumento/acumulación de caja',
+    'FCF used for': 'FCF destinado a',
+    '% of FCF': '% del FCF',
     buybacks: 'recompras',
     dividends: 'dividendos',
     EPS: 'BPA (beneficio por acción)',
@@ -4288,10 +4290,20 @@ export function analyze(data, profile = 'default', options = {}) {
       findRowAny(cf, 'Net Change in Cash', 'Variación neta de tesorería')
     ) || 0;
   if (fcfComputed !== null) {
+    const fcfAbs = Math.abs(fcfComputed);
+    const toPctOfFcf = (value) => {
+      if (fcfAbs === 0) return null;
+      return (value / fcfAbs) * 100;
+    };
+    const formatUseLine = (label, amount) => {
+      const pct = toPctOfFcf(amount);
+      return `${label} ${amount.toFixed(0)}${pct === null ? '' : ` (${pct.toFixed(1)}%)`}`;
+    };
+
     truthItems.push(
       makeItem(
         'FCF Uses Summary',
-        `FCF used for buybacks ${buyback.toFixed(0)}, dividends ${divPaid.toFixed(0)}, debt paydown ${debtRepay.toFixed(0)}, cash build ${cashBuild.toFixed(0)}`,
+        `FCF total ${fcfComputed.toFixed(0)}; FCF used for ${formatUseLine('buybacks', buyback)}, ${formatUseLine('dividends', divPaid)}, ${formatUseLine('debt paydown', debtRepay)}, ${formatUseLine('cash build', cashBuild)}`,
         [fcfComputed],
         fcfComputed < 0 && buyback + divPaid > 0 ? 'bear' : 'neutral',
         fcfComputed < 0 && buyback + divPaid > 0
