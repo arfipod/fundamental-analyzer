@@ -58,6 +58,7 @@ describe('renderDashboard trend bars', () => {
     expect(missingBarCount).toBe(1);
     expect(html).toContain('2021: 12.00');
     expect(html).toContain('2023: 20.00');
+    expect(html).not.toContain('data-i18n-point');
   });
 
   it('fills gaps with missing bars when labels include periods without values', () => {
@@ -72,6 +73,7 @@ describe('renderDashboard trend bars', () => {
     expect(totalBars).toBe(3);
     expect(missingBarCount).toBe(2);
     expect(html).toContain('2021: 15.00');
+    expect(html).toContain('aria-label="2021: 15.00"');
   });
   it('uses full period metadata when available to keep missing temporal gaps', () => {
     const values = [10, 20] as number[] & {
