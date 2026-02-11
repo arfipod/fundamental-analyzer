@@ -4482,6 +4482,75 @@ function gradeEmoji(g) {
   return { excellent: '🟢', good: '🔵', average: '🟡', poor: '🔴' }[g] || '⚪';
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function buildPrintableDashboardPanel(data, results, industrySelection = null) {
+  const sectionBlocks = (results.sections || [])
+    .map((section) => {
+      const sectionTitle = `${section.icon || '•'} ${localizeDynamicText(section.title || '')}`;
+      const metrics = (section.items || [])
+        .map((item) => {
+          const metricName = localizeDynamicText(item.name || 'Metric');
+          const metricDetail = localizeDynamicText(item.detail || '');
+          const metricValues = localizeDynamicText(item.explanation || '');
+          const signalText = localizeDynamicText(item.signalText || '');
+          const signal =
+            item.signal === 'bull'
+              ? currentLang === 'es'
+                ? '🟢 Positiva'
+                : '🟢 Positive'
+              : item.signal === 'bear'
+                ? currentLang === 'es'
+                  ? '🔴 Negativa'
+                  : '🔴 Negative'
+                : currentLang === 'es'
+                  ? '🟡 Neutral'
+                  : '🟡 Neutral';
+          const note = localizeDynamicText(item.note || '');
+          const value = item.value != null ? ` (${item.value})` : '';
+          return `<li>
+            <strong>${escapeHtml(metricName)}</strong>${escapeHtml(value)}
+            ${metricDetail ? `<br/><span>${escapeHtml(metricDetail)}</span>` : ''}
+            ${metricValues ? `<br/><span>${escapeHtml(metricValues)}</span>` : ''}
+            <br/><span><strong>${escapeHtml(currentLang === 'es' ? 'Señal' : 'Signal')}:</strong> ${escapeHtml(signal)}${signalText ? ` · ${escapeHtml(signalText)}` : ''}</span>
+            ${note ? `<br/><span>${escapeHtml(note)}</span>` : ''}
+          </li>`;
+        })
+        .join('');
+      return `<section><h3>${escapeHtml(sectionTitle)}</h3><ul>${metrics}</ul></section>`;
+    })
+    .join('');
+
+  const scoreLine = `${currentLang === 'es' ? 'Puntuación global' : 'Overall score'}: ${results.overallScore?.toFixed(1) || '-'} / 4.0`;
+  const industryLine = industrySelection
+    ? `${industrySelection.code} · ${industrySelection.name} (${industrySelection.profile})`
+    : currentLang === 'es'
+      ? 'Sin industria seleccionada'
+      : 'No selected industry';
+
+  return `<div class="printable-panel fade-up">
+    <div class="printable-header">
+      <h2>${escapeHtml(data.ticker ? `${data.ticker} — ${data.company}` : data.company)}</h2>
+      <p>${escapeHtml(data.period || '')}</p>
+      <p class="printable-help">${currentLang === 'es' ? 'Vista simplificada para imprimir. Puedes usar la impresión del navegador (Ctrl/Cmd+P).' : 'Simplified print-friendly view. Use your browser print dialog (Ctrl/Cmd+P).'}</p>
+    </div>
+    <div class="printable-summary">
+      <h3>${currentLang === 'es' ? 'Resumen rápido' : 'Quick summary'}</h3>
+      <p>${escapeHtml(scoreLine)}</p>
+      <p>${escapeHtml(currentLang === 'es' ? 'Industria:' : 'Industry:')} ${escapeHtml(industryLine)}</p>
+      <p>${escapeHtml(currentLang === 'es' ? `Métricas analizadas: ${results.totalMetrics}` : `Analyzed metrics: ${results.totalMetrics}`)}</p>
+    </div>
+    ${sectionBlocks}
+  </div>`;
+}
+
 function renderTrendBars(values, labels = []) {
   const series = Array.isArray(values) ? values : [];
   const points = Math.max(series.length, labels.length);
@@ -4516,6 +4585,7 @@ export function renderDashboard(data, results, industrySelection = null) {
         <span class="price">${data.price || ''} ${data.period ? '• ' + localizeDynamicText(data.period) : ''} • ${results.totalMetrics} ${t('metricsAnalyzed', 'metrics analyzed')}</span>
       </div>
       <div class="header-actions">
+        <button class="btn-toggle-sections" onclick="switchDashboardTab('print')">${currentLang === 'es' ? '🖨️ Imprimir' : '🖨️ Print'}</button>
         <button id="toggleSectionsBtn" class="btn-toggle-sections" onclick="toggleAllSections()">${t('collapseAll', 'Collapse all sections')}</button>
         <button class="btn-back" onclick="goBack()">${t('newAnalysis', '← New Analysis')}</button>
       </div>
@@ -4523,6 +4593,7 @@ export function renderDashboard(data, results, industrySelection = null) {
     <div class="dashboard-tabs fade-up">
       <button class="dashboard-tab active" data-tab="analysis" onclick="switchDashboardTab('analysis')">${currentLang === 'es' ? 'Análisis' : 'Analysis'}</button>
       <button class="dashboard-tab" data-tab="industry" onclick="switchDashboardTab('industry')">${currentLang === 'es' ? 'KPIs por industria' : 'Industry KPIs'}</button>
+      <button class="dashboard-tab" data-tab="print" onclick="switchDashboardTab('print')">${currentLang === 'es' ? '🖨️ Imprimible' : '🖨️ Printable'}</button>
     </div>
     <div class="dashboard-panel" data-panel="analysis">
   `;
@@ -4635,7 +4706,7 @@ export function renderDashboard(data, results, industrySelection = null) {
   });
 
   html += buildSummary(data, results);
-  html += `</div><div class="dashboard-panel" data-panel="industry" style="display:none">${buildIndustryPanel(data, results, industrySelection)}</div>`;
+  html += `</div><div class="dashboard-panel" data-panel="industry" style="display:none">${buildIndustryPanel(data, results, industrySelection)}</div><div class="dashboard-panel" data-panel="print" style="display:none">${buildPrintableDashboardPanel(data, results, industrySelection)}</div>`;
   return html;
 }
 
