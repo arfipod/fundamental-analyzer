@@ -17,6 +17,8 @@ describe('loadTestData', () => {
       vi.fn().mockResolvedValue({ ok: false, text: async () => '' })
     );
 
-    await expect(loadTestData('missing')).rejects.toThrow('Unable to load fixture missing');
+    await expect(loadTestData('missing')).rejects.toThrow(
+      'Unable to load fixture missing'
+    );
   });
 });
