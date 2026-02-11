@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
-import { LANGUAGE_KEY } from '../../infrastructure/storage/localStorage';
+import type { TranslationKey } from '../../domain/i18n/keys';
 import { translate } from '../../domain/i18n/translator';
-import { setLanguage } from '../../domain/metrics/scoring';
+import { LANGUAGE_KEY } from '../../infrastructure/storage/localStorage';
 
 export function useI18n() {
   const [lang, setLang] = useState<'es' | 'en'>(
@@ -9,16 +9,15 @@ export function useI18n() {
   );
 
   const t = useMemo(
-    () =>
-      (key: string, fallback = '') =>
-        translate(lang, key, fallback),
+    () => (key: TranslationKey, fallback = '') => translate(lang, key, fallback),
     [lang]
   );
 
   const changeLanguage = (value: string) => {
     const normalized = value === 'en' ? 'en' : 'es';
+    localStorage.setItem(LANGUAGE_KEY, normalized);
+    document.documentElement.lang = normalized;
     setLang(normalized);
-    setLanguage(normalized);
   };
 
   return { lang, t, changeLanguage };

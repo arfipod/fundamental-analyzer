@@ -3,9 +3,9 @@ import { getIndustryHeuristic } from './heuristics';
 
 describe('getIndustryHeuristic', () => {
   it('returns heuristic for known profile', () => {
-    const heuristic = getIndustryHeuristic('Financials – Banks');
+    const heuristic = getIndustryHeuristic('software');
     expect(heuristic).not.toBeNull();
-    expect(heuristic?.valuation).toContain('P/');
+    expect(heuristic?.valuation).toContain('EV/');
   });
 
   it('returns null for unknown profile', () => {

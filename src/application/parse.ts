@@ -1,5 +1,1 @@
-import { parseTIKR } from '../domain/metrics/scoring';
-
-export function parseInput(raw: string) {
-  return parseTIKR(raw);
-}
+export { parseInput } from '../domain/parser/parseInput';

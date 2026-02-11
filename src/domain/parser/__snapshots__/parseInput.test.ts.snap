@@ -1,0 +1,133 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`parseInput golden fixtures > parses apple.md 1`] = `
+{
+  "company": "AAPL US$274.62 -US$3.50 -1,26% - TIKR Terminal",
+  "sections": [
+    {
+      "name": "## Income Statement",
+      "periodCount": 21,
+      "rowCount": 42,
+    },
+    {
+      "name": "## Balance Sheet",
+      "periodCount": 21,
+      "rowCount": 49,
+    },
+    {
+      "name": "## Cash Flow",
+      "periodCount": 21,
+      "rowCount": 35,
+    },
+    {
+      "name": "## Ratios",
+      "periodCount": 10,
+      "rowCount": 40,
+    },
+    {
+      "name": "## Valuation Multiples",
+      "periodCount": 5,
+      "rowCount": 41,
+    },
+    {
+      "name": "## Analyst Price Targets",
+      "periodCount": 0,
+      "rowCount": 15,
+    },
+    {
+      "name": "## Consensus Estimates",
+      "periodCount": 14,
+      "rowCount": 53,
+    },
+  ],
+  "ticker": "#",
+}
+`;
+
+exports[`parseInput golden fixtures > parses constellation-software.md 1`] = `
+{
+  "company": "Constellation Software Inc.",
+  "sections": [
+    {
+      "name": "## Income Statement",
+      "periodCount": 21,
+      "rowCount": 57,
+    },
+    {
+      "name": "## Balance Sheet",
+      "periodCount": 21,
+      "rowCount": 55,
+    },
+    {
+      "name": "## Cash Flow",
+      "periodCount": 21,
+      "rowCount": 40,
+    },
+    {
+      "name": "## Ratios",
+      "periodCount": 10,
+      "rowCount": 40,
+    },
+    {
+      "name": "## Valuation Multiples",
+      "periodCount": 5,
+      "rowCount": 41,
+    },
+    {
+      "name": "## Analyst Price Targets",
+      "periodCount": 0,
+      "rowCount": 14,
+    },
+    {
+      "name": "## Consensus Estimates",
+      "periodCount": 14,
+      "rowCount": 51,
+    },
+  ],
+  "ticker": "# CSU",
+}
+`;
+
+exports[`parseInput golden fixtures > parses palantir.md 1`] = `
+{
+  "company": "PLTR US$138.55 -US$4.37 -3,05% - TIKR Terminal",
+  "sections": [
+    {
+      "name": "## Income Statement",
+      "periodCount": 9,
+      "rowCount": 49,
+    },
+    {
+      "name": "## Balance Sheet",
+      "periodCount": 9,
+      "rowCount": 50,
+    },
+    {
+      "name": "## Cash Flow",
+      "periodCount": 9,
+      "rowCount": 39,
+    },
+    {
+      "name": "## Ratios",
+      "periodCount": 8,
+      "rowCount": 36,
+    },
+    {
+      "name": "## Valuation Multiples",
+      "periodCount": 5,
+      "rowCount": 37,
+    },
+    {
+      "name": "## Analyst Price Targets",
+      "periodCount": 0,
+      "rowCount": 15,
+    },
+    {
+      "name": "## Consensus Estimates",
+      "periodCount": 9,
+      "rowCount": 50,
+    },
+  ],
+  "ticker": "#",
+}
+`;

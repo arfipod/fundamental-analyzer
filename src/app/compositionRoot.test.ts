@@ -12,27 +12,14 @@ class MemoryStorage {
 }
 
 beforeEach(() => {
-  Object.defineProperty(globalThis, 'localStorage', {
-    value: new MemoryStorage(),
-    configurable: true
-  });
-  Object.defineProperty(globalThis, 'window', {
-    value: {},
-    configurable: true,
-    writable: true
-  });
+  Object.defineProperty(globalThis, 'localStorage', { value: new MemoryStorage(), configurable: true });
 });
 
 describe('buildDependencies', () => {
-  it('wires datasets and i18n on window and returns adapters', () => {
+  it('returns storage and logger and migrates language', () => {
     const deps = buildDependencies();
     expect(deps.storage).toBeDefined();
     expect(deps.logger).toBeDefined();
-    const win = window as unknown as {
-      I18N: { en: { appTitle: string } };
-      GICS_INDUSTRIES: unknown[];
-    };
-    expect(win.I18N.en.appTitle).toBe('Fundamental Analyzer');
-    expect(Array.isArray(win.GICS_INDUSTRIES)).toBe(true);
+    expect(localStorage.getItem('fundamentalAnalyzerLang')).toBe('es');
   });
 });
