@@ -986,12 +986,16 @@ export function parseTIKR(raw) {
 // =========================================================
 function getRecentValues(row, n = 5) {
   if (!row) return [];
-  const mapped = row.values
-    .map((v, i) => ({ value: parseNumber(v), label: row.dates?.[i] || '' }))
-    .filter((x) => x.value !== null);
-  const sliced = mapped.slice(-n);
-  const vals = sliced.map((x) => x.value);
-  vals.labels = sliced.map((x) => x.label);
+  const mapped = row.values.map((v, i) => ({
+    value: parseNumber(v),
+    label: row.dates?.[i] || ''
+  }));
+  const slicedAll = mapped.slice(-n);
+  const slicedNumeric = slicedAll.filter((x) => x.value !== null);
+  const vals = slicedNumeric.map((x) => x.value);
+  vals.labels = slicedNumeric.map((x) => x.label);
+  vals.fullValues = slicedAll.map((x) => x.value);
+  vals.fullLabels = slicedAll.map((x) => x.label);
   return vals;
 }
 
@@ -1748,7 +1752,7 @@ export function analyze(data, profile = 'default', options = {}) {
         makeItem(
           'Operating Leverage',
           `Gross Δ: ${grossDelta > 0 ? '+' : ''}${grossDelta.toFixed(1)}pp | Op Δ: ${opDelta > 0 ? '+' : ''}${opDelta.toFixed(1)}pp`,
-          [],
+          opVals,
           expanding ? 'bull' : opDelta > 0 ? 'neutral' : 'bear',
           expanding
             ? 'Positive Leverage'
@@ -4479,14 +4483,16 @@ function gradeEmoji(g) {
 }
 
 function renderTrendBars(values, labels = []) {
-  if (!values || values.length < 2) return '';
-  const numeric = values.filter(
+  const series = Array.isArray(values) ? values : [];
+  const points = Math.max(series.length, labels.length);
+  if (!points) return '';
+
+  const numeric = series.filter(
     (v) => v !== null && v !== undefined && !isNaN(v)
   );
-  if (!numeric.length) return '';
   const max = Math.max(...numeric.map((v) => Math.abs(v)), 1);
-  return `<div class="trend-bar">${values
-    .map((v, i) => {
+  return `<div class="trend-bar">${Array.from({ length: points }, (_, i) => {
+      const v = series[i];
       if (v === null || v === undefined || isNaN(v))
         return '<div class="bar bar-missing"></div>';
       const h = Math.max(2, (Math.abs(v) / max) * 30);
@@ -4616,7 +4622,7 @@ export function renderDashboard(data, results, industrySelection = null) {
             <div class="metric-detail">${localizeDynamicText(item.detail || '')}</div>
             ${item.explanation ? `<div class="metric-values">${localizeDynamicText(item.explanation)}</div>` : ''}
             <div class="metric-values">${t('confidence', 'Confidence')}: ${(item.confidence * 100).toFixed(0)}%</div>
-            ${renderTrendBars(item.values, item.labels || [])}
+            ${renderTrendBars(item.values?.fullValues || item.values, item.values?.fullLabels || item.labels || [])}
           </div>
           <div class="signal ${sigCls}">
             <span class="dot ${dotCls}"></span>
