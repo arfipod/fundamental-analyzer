@@ -95,3 +95,17 @@ npm run test:coverage
   - Check environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `npm_config_http_proxy`, `npm_config_https_proxy`).
 - In restricted corporate/CI networks, you may need an internal npm mirror/allowlist for scoped packages (e.g. `@eslint/*`, `@types/*`).
 - When dependencies are unavailable, run static review checks and retry in a network-enabled CI runner.
+
+
+## 12) Automated testing & coverage notes
+- Unit/integration tests are run with **Vitest**.
+- UI tests use **Testing Library** with `jsdom` (`@testing-library/react`, `@testing-library/user-event`).
+- Coverage command: `npm run test:coverage`.
+
+Current focus:
+- High coverage on application/infrastructure logic and selected UI behavior (industry search, analyze flow, i18n hook behavior).
+- Legacy migrated modules (`scripts.js`, `locales.js`, `industry-data.js`) and type-only contracts (`types.ts`, `ports/*`) are intentionally not forced to 100% because they are either non-runtime or retained for compatibility.
+
+Recommended CI gate:
+- Keep `typecheck`, `lint`, `test`, and `build` mandatory.
+- Track coverage trend over time and prioritize critical-path runtime modules first.
