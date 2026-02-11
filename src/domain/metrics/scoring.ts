@@ -4079,7 +4079,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (invVals2.length >= 2 && revVals.length >= 2) {
     const invY = yoyGrowth(invVals2).slice(-1)[0];
     const revYY = yoyGrowth(revVals).slice(-1)[0];
-    if (invY !== null && revYY !== null) {
+    if (Number.isFinite(invY) && Number.isFinite(revYY)) {
       const spread = invY - revYY;
       balanceItems.push(
         makeItem(

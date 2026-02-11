@@ -121,4 +121,18 @@ describe('analysis pipeline', () => {
       runAnalysis(parsed, 'default', { includeAnalystNoise: false })
     ).not.toThrow();
   });
+
+  it('analyzes cash-flow-only CSV input without crashing', async () => {
+    const { parseInput } = await import('./parse');
+    const { runAnalysis } = await import('./analyze');
+
+    const csv = `Date,Net Income,Cash from Operations,Capital Expenditure,Free Cash Flow\n2006-05-31,3381,4541,-236,4305\n2025-11-30,15425,22296,-35477,-13181`;
+
+    const parsed = parseInput(csv) as ParsedInput;
+
+    expect(parsed.sections?.['Cash Flow']).toBeTruthy();
+    expect(() =>
+      runAnalysis(parsed, 'default', { includeAnalystNoise: false })
+    ).not.toThrow();
+  });
 });
