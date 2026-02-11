@@ -4,7 +4,8 @@ import {
   switchDashboardTab,
   toggleAllSections,
   toggleSection,
-  updateToggleSectionsButton
+  updateToggleSectionsButton,
+  openPrintView
 } from '../../domain/metrics/scoring';
 import { useAnalyzer } from '../hooks/useAnalyzer';
 import { useI18n } from '../hooks/useI18n';
@@ -47,6 +48,7 @@ export function AnalyzerPage() {
     window.toggleSection = toggleSection;
     window.toggleAllSections = toggleAllSections;
     window.switchDashboardTab = switchDashboardTab;
+    window.openPrintView = openPrintView;
     window.goBack = clear;
     updateToggleSectionsButton();
   }, [dashboardHtml, clear]);
@@ -205,6 +207,7 @@ declare global {
     toggleSection: typeof toggleSection;
     toggleAllSections: typeof toggleAllSections;
     switchDashboardTab: typeof switchDashboardTab;
+    openPrintView: typeof openPrintView;
     goBack: () => void;
   }
 }
