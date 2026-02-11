@@ -86,4 +86,10 @@ describe('AnalyzerPage', () => {
     expect(args[1]).toBe(true);
     expect(args[3]).toBe('es');
   });
+
+  it('shows footer credit text', () => {
+    render(<AnalyzerPage />);
+
+    expect(screen.getByText('Made with 💙 by arrf')).toBeTruthy();
+  });
 });

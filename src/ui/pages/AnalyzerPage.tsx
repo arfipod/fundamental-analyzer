@@ -183,6 +183,7 @@ export function AnalyzerPage() {
           dangerouslySetInnerHTML={{ __html: dashboardHtml }}
         />
       )}
+      <footer className="app-footer">Made with 💙 by arrf</footer>
     </>
   );
 }
