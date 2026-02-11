@@ -395,3 +395,123 @@ describe('i18n safeguards and bidirectional localization', () => {
     expect(html).toContain('Insufficient data');
   });
 });
+
+describe('expanded TIKR metric coverage regressions', () => {
+  it('ignores non-period consensus columns like CAGR when selecting forward values', () => {
+    setLanguage('en');
+    const dates = ['2025A', '2026E', '2027E', '2028E', '2029E', 'Crecmiento compuesto'];
+    const data = {
+      company: 'Consensus Corp',
+      sections: {
+        'Income Statement': {
+          dates,
+          rows: [{ label: 'Revenues', values: ['200', '', '', '', '', ''], dates }]
+        },
+        'Balance Sheet': { dates, rows: [] },
+        'Cash Flow': { dates, rows: [] },
+        Ratios: { dates, rows: [] },
+        'Consensus Estimates': {
+          dates,
+          rows: [
+            {
+              label: 'Ingresos',
+              values: ['200', '210', '220', '225', '230', '9999'],
+              dates
+            }
+          ]
+        }
+      }
+    };
+
+    const results = analyze(data, 'default', {
+      includeAnalystNoise: false
+    }) as { sections: ResultSection[] };
+
+    const consensus = results.sections.find((s) => s.id === 'consensus');
+    const revEstimate = consensus?.items.find(
+      (item) => item.name === 'Consensus Revenue Estimate'
+    );
+
+    expect(revEstimate).toBeTruthy();
+    expect(revEstimate?.detail).toContain('Fwd: $230M');
+    expect(revEstimate?.detail).not.toContain('9999');
+  });
+
+  it('detects enterprise value from spanish "Valor empresarial total" labels', () => {
+    setLanguage('en');
+    const dates = ['2024', '2025'];
+    const data = {
+      company: 'EV Corp',
+      sections: {
+        'Income Statement': { dates, rows: [] },
+        'Balance Sheet': { dates, rows: [] },
+        'Cash Flow': { dates, rows: [] },
+        Ratios: { dates, rows: [] },
+        'Valuation Multiples': {
+          dates,
+          rows: [
+            { label: 'Capitalización bursátil (MM)', values: ['390000', '400000'], dates },
+            { label: 'Valor empresarial total (MM)', values: ['370000', '380000'], dates }
+          ]
+        }
+      }
+    };
+
+    const results = analyze(data, 'default', {
+      includeAnalystNoise: false
+    }) as { sections: ResultSection[] };
+
+    const valuation = results.sections.find((s) => s.id === 'valuation');
+    const evVsMc = valuation?.items.find(
+      (item) => item.name === 'Enterprise Value vs Market Cap'
+    );
+
+    expect(evVsMc).toBeTruthy();
+    expect(evVsMc?.detail).toContain('MC: $400.0B');
+    expect(evVsMc?.detail).toContain('EV: $380.0B');
+  });
+
+  it('surfaces newly added DPO and debt/capital metrics when present in ratios', () => {
+    setLanguage('en');
+    const dates = ['2023', '2024', '2025'];
+    const data = {
+      company: 'Coverage Corp',
+      sections: {
+        'Income Statement': { dates, rows: [] },
+        'Balance Sheet': { dates, rows: [] },
+        'Cash Flow': { dates, rows: [] },
+        Ratios: {
+          dates,
+          rows: [
+            {
+              label: 'Promedio Días a pagar pendientes',
+              values: ['95', '102', '110'],
+              dates
+            },
+            {
+              label: 'Deuda total / Capital total',
+              values: ['40', '45', '50'],
+              dates
+            }
+          ]
+        }
+      }
+    };
+
+    const results = analyze(data, 'default', {
+      includeAnalystNoise: false
+    }) as { sections: ResultSection[] };
+
+    const efficiency = results.sections.find((s) => s.id === 'efficiency');
+    const debt = results.sections.find((s) => s.id === 'debt');
+
+    expect(
+      efficiency?.items.some(
+        (item) => item.name === 'Days Payable Outstanding (DPO)'
+      )
+    ).toBe(true);
+    expect(
+      debt?.items.some((item) => item.name === 'Total Debt / Capital')
+    ).toBe(true);
+  });
+});
