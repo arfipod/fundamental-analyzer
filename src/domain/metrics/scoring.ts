@@ -648,6 +648,16 @@ function isLTM(label) {
   return normalized.includes('ltm') || normalized === 'ttm';
 }
 
+function isNonPeriodLabel(label) {
+  const normalized = String(label || '').toLowerCase().trim();
+  return (
+    normalized.includes('cagr') ||
+    normalized.includes('crecmiento compuesto') ||
+    normalized.includes('crecimiento compuesto') ||
+    normalized.includes('compound growth')
+  );
+}
+
 function toSeries(row, options = {}) {
   if (!row?.values?.length) return [];
   const excludeLTM = options.excludeLTM !== false;
@@ -656,7 +666,12 @@ function toSeries(row, options = {}) {
       date: row.dates?.[i] ?? String(i),
       value: parseNumber(v)
     }))
-    .filter((p) => p.value !== null && (!excludeLTM || !isLTM(p.date)));
+    .filter(
+      (p) =>
+        p.value !== null &&
+        (!excludeLTM || !isLTM(p.date)) &&
+        !isNonPeriodLabel(p.date)
+    );
 }
 
 function alignByDate(rowA, rowB, n = 6, options = {}) {
@@ -1071,11 +1086,14 @@ function getRecentValues(row, n = 5, options = {}) {
   const mapped = row.values.map((v, i) => {
     const label = row.dates?.[i] || '';
     const value = parseNumber(v);
+    const skipNonPeriod = isNonPeriodLabel(label);
     return {
       value:
         options.excludeLTM !== false && isLTM(label)
           ? null
-          : value,
+          : skipNonPeriod
+            ? null
+            : value,
       label
     };
   });
@@ -2632,6 +2650,8 @@ export function analyze(data, profile = 'default', options = {}) {
   const debtEquityRow = findRowAny(
     ratios,
     'Deuda total / Fondos propios',
+    'Deuda total / capital total',
+    'Pasivo total / Activo total',
     'Total Debt/Equity',
     'Debt to Equity'
   );
@@ -2651,6 +2671,44 @@ export function analyze(data, profile = 'default', options = {}) {
             : latest < 80
               ? 'Moderate'
               : 'Leveraged'
+      )
+    );
+  }
+
+  const debtCapitalRow = findRowAny(
+    ratios,
+    'Deuda total / Capital total',
+    'Total Debt / Capital'
+  );
+  if (debtCapitalRow) {
+    const vals = getRecentValues(debtCapitalRow, 8);
+    const latest = vals[vals.length - 1];
+    debtItems.push(
+      makeItem(
+        'Total Debt / Capital',
+        `Latest: ${latest?.toFixed(1)}%`,
+        vals,
+        latest < 35 ? 'bull' : latest < 55 ? 'neutral' : 'bear',
+        latest < 35 ? 'Conservative' : latest < 55 ? 'Moderate' : 'Leveraged'
+      )
+    );
+  }
+
+  const liabilitiesAssetsRow = findRowAny(
+    ratios,
+    'Pasivo total / Activo total',
+    'Total Liabilities / Total Assets'
+  );
+  if (liabilitiesAssetsRow) {
+    const vals = getRecentValues(liabilitiesAssetsRow, 8);
+    const latest = vals[vals.length - 1];
+    debtItems.push(
+      makeItem(
+        'Total Liabilities / Total Assets',
+        `Latest: ${latest?.toFixed(1)}%`,
+        vals,
+        latest < 55 ? 'bull' : latest < 70 ? 'neutral' : 'bear',
+        latest < 55 ? 'Asset-backed' : latest < 70 ? 'Balanced' : 'Liability Heavy'
       )
     );
   }
@@ -2814,6 +2872,82 @@ export function analyze(data, profile = 'default', options = {}) {
         )
       );
     }
+  }
+
+  const ebitdaMinusCapexCovRow = findRowAny(
+    ratios,
+    '(EBITDA - Capex) / Gastos por intereses',
+    '(EBITDA - Capex) / Interest Expense'
+  );
+  if (ebitdaMinusCapexCovRow) {
+    const vals = getRecentValues(ebitdaMinusCapexCovRow, 6);
+    const latest = vals[vals.length - 1];
+    debtItems.push(
+      makeItem(
+        '(EBITDA - Capex) / Interest',
+        `Latest: ${latest?.toFixed(1)}x`,
+        vals,
+        latest > 8 ? 'bull' : latest > 3 ? 'neutral' : 'bear',
+        latest > 8 ? 'Well Covered' : latest > 3 ? 'Adequate' : 'Risky'
+      )
+    );
+  }
+
+  const ffoDebtRow = findRowAny(
+    ratios,
+    'FFO a deuda total',
+    'FFO to Total Debt'
+  );
+  if (ffoDebtRow) {
+    const vals = getRecentValues(ffoDebtRow, 6);
+    const latest = vals[vals.length - 1];
+    debtItems.push(
+      makeItem(
+        'FFO to Total Debt',
+        `Latest: ${latest?.toFixed(2)}x`,
+        vals,
+        latest > 0.4 ? 'bull' : latest > 0.2 ? 'neutral' : 'bear',
+        latest > 0.4 ? 'Strong Deleveraging Capacity' : latest > 0.2 ? 'Adequate' : 'Weak'
+      )
+    );
+  }
+
+  const totalDebtEbitdaRow = findRowAny(
+    ratios,
+    'Deuda total / EBITDA',
+    'Total Debt / EBITDA'
+  );
+  if (totalDebtEbitdaRow) {
+    const vals = getRecentValues(totalDebtEbitdaRow, 6);
+    const latest = vals[vals.length - 1];
+    debtItems.push(
+      makeItem(
+        'Total Debt / EBITDA',
+        `Latest: ${latest?.toFixed(2)}x`,
+        vals,
+        latest < 2 ? 'bull' : latest < 3.5 ? 'neutral' : 'bear',
+        latest < 2 ? 'Low Leverage' : latest < 3.5 ? 'Manageable' : 'High'
+      )
+    );
+  }
+
+  const netDebtEbitdaCapexRow = findRowAny(
+    ratios,
+    'Deuda Neta / (EBITDA - Capex)',
+    'Net Debt / (EBITDA - Capex)'
+  );
+  if (netDebtEbitdaCapexRow) {
+    const vals = getRecentValues(netDebtEbitdaCapexRow, 6);
+    const latest = vals[vals.length - 1];
+    debtItems.push(
+      makeItem(
+        'Net Debt / (EBITDA - Capex)',
+        `Latest: ${latest?.toFixed(2)}x`,
+        vals,
+        latest < 0 ? 'bull' : latest < 2.5 ? 'neutral' : 'bear',
+        latest < 0 ? 'Net Cash' : latest < 2.5 ? 'Comfortable' : 'Stretched'
+      )
+    );
   }
 
   const cashAssetsRow = findRowAny(ratios, 'Cash / Assets');
@@ -3224,6 +3358,92 @@ export function analyze(data, profile = 'default', options = {}) {
     }
   }
 
+  const dpoRow = findRowAny(
+    ratios,
+    'Promedio Días a pagar pendientes',
+    'Days Payable Outstanding',
+    'DPO'
+  );
+  if (dpoRow) {
+    const vals = getRecentValues(dpoRow, 6);
+    const latest = vals[vals.length - 1];
+    if (latest !== null) {
+      effItems.push(
+        makeItem(
+          'Days Payable Outstanding (DPO)',
+          `Latest: ${latest?.toFixed(0)} days`,
+          vals,
+          latest > 60 ? 'bull' : latest > 35 ? 'neutral' : 'bear',
+          latest > 75 ? 'Strong Supplier Float' : latest > 35 ? 'Normal' : 'Low Payables Float'
+        )
+      );
+    }
+  }
+
+  const fixedAssetsTurnoverRow = findRowAny(
+    ratios,
+    'Rotación de activo fijo',
+    'Fixed Assets Turnover'
+  );
+  if (fixedAssetsTurnoverRow) {
+    const vals = getRecentValues(fixedAssetsTurnoverRow, 6);
+    const latest = vals[vals.length - 1];
+    const trend = getTrend(vals);
+    if (latest !== null) {
+      effItems.push(
+        makeItem(
+          'Fixed Assets Turnover',
+          `Latest: ${latest?.toFixed(2)}x — Trend: ${trend}`,
+          vals,
+          latest > 4 ? 'bull' : latest > 2 ? 'neutral' : 'bear',
+          latest > 6 ? 'Very Efficient' : latest > 4 ? 'Efficient' : latest > 2 ? 'Moderate' : 'Underutilized'
+        )
+      );
+    }
+  }
+
+  const wcTurnoverRow = findRowAny(
+    ratios,
+    'Rotación del capital circulante',
+    'Working Capital Turnover'
+  );
+  if (wcTurnoverRow) {
+    const vals = getRecentValues(wcTurnoverRow, 6);
+    const latest = vals[vals.length - 1];
+    if (latest !== null) {
+      effItems.push(
+        makeItem(
+          'Working Capital Turnover',
+          `Latest: ${latest?.toFixed(2)}x`,
+          vals,
+          latest > 8 ? 'bull' : latest > 3 ? 'neutral' : 'bear',
+          latest > 8 ? 'High Throughput' : latest > 3 ? 'Adequate' : 'Heavy Working Capital'
+        )
+      );
+    }
+  }
+
+  const cfoToCurrentLiabRow = findRowAny(
+    ratios,
+    'Flujo de caja operativo a pasivo corriente',
+    'Operating Cash Flow to Current Liabilities'
+  );
+  if (cfoToCurrentLiabRow) {
+    const vals = getRecentValues(cfoToCurrentLiabRow, 6);
+    const latest = vals[vals.length - 1];
+    if (latest !== null) {
+      effItems.push(
+        makeItem(
+          'Operating Cash Flow / Current Liabilities',
+          `Latest: ${latest?.toFixed(2)}x`,
+          vals,
+          latest > 1 ? 'bull' : latest > 0.6 ? 'neutral' : 'bear',
+          latest > 1 ? 'Self-funded Current Liabilities' : latest > 0.6 ? 'Acceptable' : 'Thin Coverage'
+        )
+      );
+    }
+  }
+
   const salesEmpRow = findRowAny(
     ratios,
     'Sales Per Employee',
@@ -3296,6 +3516,7 @@ export function analyze(data, profile = 'default', options = {}) {
   const evRow = findRowAny(
     vmOrIS,
     'Valor total de la empresa',
+    'Valor empresarial total',
     'Total Enterprise Value',
     'Enterprise Value',
     'TEV'
@@ -3330,6 +3551,25 @@ export function analyze(data, profile = 'default', options = {}) {
     'NTM P/E',
     'Forward P/E'
   );
+
+  const evRevenueNtmRow = findRowAny(
+    vm,
+    'NTM EV / Revenues',
+    'Valor de empresa / ingresos totales de la empresa NTM'
+  );
+  if (evRevenueNtmRow) {
+    const vals = getRecentValues(evRevenueNtmRow, 8);
+    const latest = vals[vals.length - 1];
+    valItems.push(
+      makeItem(
+        'EV / Revenues (NTM)',
+        `Latest: ${latest?.toFixed(2)}x`,
+        vals,
+        latest < 5 ? 'bull' : latest < 10 ? 'neutral' : 'bear',
+        latest < 5 ? 'Reasonable' : latest < 10 ? 'Growth Premium' : 'Rich'
+      )
+    );
+  }
   if (peRow) {
     const vals = getRecentValues(peRow, 8);
     const latest = vals[vals.length - 1];
@@ -3480,6 +3720,71 @@ export function analyze(data, profile = 'default', options = {}) {
       )
     );
   }
+
+  const mcapFcfNtmRow = findRowAny(
+    vm,
+    'NTM Market Cap / Free Cash Flow'
+  );
+  if (mcapFcfNtmRow) {
+    const vals = getRecentValues(mcapFcfNtmRow, 8);
+    const latest = vals[vals.length - 1];
+    valItems.push(
+      makeItem(
+        'Market Cap / Free Cash Flow (NTM)',
+        `Latest: ${latest?.toFixed(1)}x`,
+        vals,
+        latest < 20 ? 'bull' : latest < 35 ? 'neutral' : 'bear',
+        latest < 20 ? 'Attractive' : latest < 35 ? 'Fair' : 'Demanding'
+      )
+    );
+  }
+
+  const ltmEvRevenueRow = findRowAny(
+    vm,
+    'Valor / ingresos totales de la empresa de LTM',
+    'LTM EV / Revenues'
+  );
+  const ltmEvGpRow = findRowAny(
+    vm,
+    'LTM Total Enterprise Value / Gross Profit'
+  );
+  const ltmEvEbitdaRow = findRowAny(vm, 'LTM Total Enterprise Value / EBITDA');
+  const ltmEvEbitRow = findRowAny(vm, 'LTM Total Enterprise Value / EBIT');
+  const ltmEvUfcfRow = findRowAny(
+    vm,
+    'Valor empresarial total de LTM / Flujo de caja libre sin apalancamiento',
+    'LTM EV / Unlevered Free Cash Flow'
+  );
+  const ltmMcapLfcfRow = findRowAny(
+    vm,
+    'Capitalización de mercado LTM / Flujo de caja libre apalancado',
+    'LTM Market Cap / Levered Free Cash Flow'
+  );
+  const pNcavRow = findRowAny(vm, 'LTM Price / Net Current Asset Value', 'P/NCAV');
+
+  [
+    ['EV / Revenues (LTM)', ltmEvRevenueRow],
+    ['EV / Gross Profit (LTM)', ltmEvGpRow],
+    ['EV / EBITDA (LTM)', ltmEvEbitdaRow],
+    ['EV / EBIT (LTM)', ltmEvEbitRow],
+    ['EV / Unlevered FCF (LTM)', ltmEvUfcfRow],
+    ['Market Cap / Levered FCF (LTM)', ltmMcapLfcfRow],
+    ['Price / NCAV (LTM)', pNcavRow]
+  ].forEach(([name, row]) => {
+    if (!row) return;
+    const vals = getRecentValues(row, 8);
+    const latest = vals[vals.length - 1];
+    if (latest === null || latest === undefined) return;
+    valItems.push(
+      makeItem(
+        String(name),
+        `Latest: ${latest?.toFixed(2)}x`,
+        vals,
+        latest < 15 ? 'bull' : latest < 30 ? 'neutral' : 'bear',
+        latest < 15 ? 'Attractive' : latest < 30 ? 'Fair' : 'Expensive'
+      )
+    );
+  });
 
   const fcfYieldRow = findRowAny(
     vm,
@@ -3881,6 +4186,159 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   // ══════════════════════════════════════════════════════════
+  // 11B. REPORTED LINE-ITEM COVERAGE (TIKR parity helper)
+  // ══════════════════════════════════════════════════════════
+  function formatReportedValue(rowLabel, value) {
+    const l = String(rowLabel || '').toLowerCase();
+    if (l.includes('%') || l.includes('margen') || l.includes('yield'))
+      return `${value.toFixed(1)}%`;
+    if (l.includes('ratio') || l.includes('/ ') || l.includes(' / ') || l.includes(' x') || l.endsWith('x'))
+      return `${value.toFixed(2)}x`;
+    if (Math.abs(value) >= 1000) return `$${value.toFixed(0)}M`;
+    return value.toFixed(2);
+  }
+
+  function pushReportedLine(items, section, metricName, ...keywordSets) {
+    const row = findRowAny(section, ...keywordSets);
+    if (!row) return;
+    const vals = getRecentValues(row, 8);
+    const latest = vals[vals.length - 1];
+    if (latest === null || latest === undefined) return;
+    items.push(
+      makeItem(
+        metricName,
+        `Latest: ${formatReportedValue(row.label || metricName, latest)}`,
+        vals,
+        'info',
+        'Reported'
+      )
+    );
+  }
+
+  const reportedItems = [];
+
+  // Income Statement coverage
+  pushReportedLine(reportedItems, is, 'Revenue YoY %', '% De cambio interanual', ['Revenue', '% Change YoY']);
+  pushReportedLine(reportedItems, is, 'Gross Profit YoY %', ['Beneficio bruto', '% De cambio interanual'], ['Gross Profit', '% Change YoY']);
+  pushReportedLine(reportedItems, is, 'Operating Income YoY %', ['Beneficio operativo', '% De cambio interanual'], ['Operating Income', '% Change YoY']);
+  pushReportedLine(reportedItems, is, 'Diluted EPS YoY %', ['BPA diluido sin extraordinarios', '% De cambio interanual'], ['Diluted EPS', '% Change YoY']);
+  pushReportedLine(reportedItems, is, 'Diluted Shares YoY %', ['Promedio ponderado de acciones diluidas', '% De cambio interanual'], ['Weighted Average Diluted Shares Outstanding', '% Change YoY']);
+  pushReportedLine(reportedItems, is, 'Basic Shares YoY %', ['Promedio ponderado de acciones básicas', '% De cambio interanual'], ['Weighted Average Basic Shares Outstanding', '% Change YoY']);
+  pushReportedLine(reportedItems, is, 'Dividend/Share YoY %', ['Dividendo por acción', '% De cambio interanual'], ['Dividend per Share', '% Change YoY']);
+  pushReportedLine(reportedItems, is, 'EBITDA YoY %', ['EBITDA', '% De cambio interanual'], ['EBITDA', '% Change YoY']);
+  pushReportedLine(reportedItems, is, 'Depreciation & Amortization YoY %', ['Depreciación y amortización', '% De cambio interanual'], ['Depreciation & Amortization', '% Change YoY']);
+  pushReportedLine(reportedItems, is, 'Interest Income', 'Ingresos por intereses e inversiones', 'Interest And Investment Income');
+  pushReportedLine(reportedItems, is, 'Other Non-Operating Income (Expense)', 'Otros ingresos (gastos) no operativos', 'Other Non Operating Income');
+  pushReportedLine(reportedItems, is, 'EBT Excl. Unusual Items', 'EBT excl. Artículos inusuales', 'EBT Excl. Unusual Items');
+  pushReportedLine(reportedItems, is, 'EBT Incl. Unusual Items', 'EBT incl. Artículos extraordinarios', 'EBT Incl. Unusual Items');
+  pushReportedLine(reportedItems, is, 'Tax Expense', 'Gastos de impuestos', 'Income Tax Expense');
+  pushReportedLine(reportedItems, is, 'Net Income from Continuing Operations', 'Beneficios por operaciones continuadas', 'Earnings From Continuing Operations');
+  pushReportedLine(reportedItems, is, 'Basic EPS', 'BPA básico', 'Basic EPS');
+  pushReportedLine(reportedItems, is, 'Weighted Avg Diluted Shares', 'Promedio ponderado de acciones diluidas en circulación', 'Weighted Average Diluted Shares Outstanding');
+  pushReportedLine(reportedItems, is, 'Weighted Avg Basic Shares', 'Promedio ponderado de acciones básicas en circulación', 'Weighted Average Basic Shares Outstanding');
+  pushReportedLine(reportedItems, is, 'EBITDAR', 'EBITDAR');
+
+  // Balance Sheet coverage
+  pushReportedLine(reportedItems, bs, 'Short-term Investments', 'Inversiones a corto plazo', 'Short-term Investments');
+  pushReportedLine(reportedItems, bs, 'Total Cash + ST Investments', 'Efectivo total e inversiones a corto plazo', 'Total Cash And Short Term Investments');
+  pushReportedLine(reportedItems, bs, 'Other Receivables', 'Otros por cobrar', 'Other Receivables');
+  pushReportedLine(reportedItems, bs, 'Total Receivables', 'Total de cuentas por cobrar', 'Total Receivables');
+  pushReportedLine(reportedItems, bs, 'Other Current Assets', 'Otro activo corriente', 'Other Current Assets');
+  pushReportedLine(reportedItems, bs, 'Total Current Assets', 'Total de activo corriente', 'Total Current Assets');
+  pushReportedLine(reportedItems, bs, 'Gross PP&E', 'Inmobilizado material bruto', 'Gross Property Plant And Equipment');
+  pushReportedLine(reportedItems, bs, 'Accumulated Depreciation', 'Depreciación acumulada', 'Accumulated Depreciation');
+  pushReportedLine(reportedItems, bs, 'Net PP&E', 'Inmobilizado material neto', 'Net Property Plant And Equipment');
+  pushReportedLine(reportedItems, bs, 'Long-term Investments', 'Inversiones a largo plazo', 'Long Term Investments');
+  pushReportedLine(reportedItems, bs, 'Deferred Tax Assets (LT)', 'Activos por impuestos diferidos a largo plazo', 'Deferred Tax Assets Long-Term');
+  pushReportedLine(reportedItems, bs, 'Other Long-term Assets', 'Otros activos a largo plazo', 'Other Long-Term Assets');
+  pushReportedLine(reportedItems, bs, 'Accounts Payable', 'Cuentas por pagar', 'Accounts Payable');
+  pushReportedLine(reportedItems, bs, 'Accrued Expenses', 'Gastos devengados', 'Accrued Expenses');
+  pushReportedLine(reportedItems, bs, 'Short-term Borrowings', 'Préstamos de corto plazo', 'Short-term Borrowings');
+  pushReportedLine(reportedItems, bs, 'Current Portion of LT Debt', 'Porción corriente de la deuda a largo plazo', 'Current Portion of Long-Term Debt');
+  pushReportedLine(reportedItems, bs, 'Current Lease Obligations', 'Porción corriente de las obligaciones de arrendamiento financiero', 'Current Portion of Capital Lease Obligations');
+  pushReportedLine(reportedItems, bs, 'Current Income Taxes Payable', 'Impuestos sobre la renta actuales por pagar', 'Current Income Taxes Payable');
+  pushReportedLine(reportedItems, bs, 'Unearned Revenue Current', 'Unearned Revenue Current');
+  pushReportedLine(reportedItems, bs, 'Other Current Liabilities', 'Otros pasivos corrientes', 'Other Current Liabilities');
+  pushReportedLine(reportedItems, bs, 'Total Current Liabilities', 'Total pasivo corriente', 'Total Current Liabilities');
+  pushReportedLine(reportedItems, bs, 'Long-term Debt', 'Deuda a largo plazo', 'Long-Term Debt');
+  pushReportedLine(reportedItems, bs, 'Capital Leases (LT)', 'Arrendamientos de capitales', 'Capital Leases');
+  pushReportedLine(reportedItems, bs, 'Unearned Revenue Non-current', 'Ingresos no devengados no corrientes', 'Unearned Revenue Non Current');
+  pushReportedLine(reportedItems, bs, 'Other Non-current Liabilities', 'Otro pasivo no corrientes', 'Other Non Current Liabilities');
+  pushReportedLine(reportedItems, bs, 'Common Stock', 'Acciones comunes', 'Common Stock');
+  pushReportedLine(reportedItems, bs, 'AOCI / Comprehensive Income & Other', 'Resultado integral y otros', 'Comprehensive Income and Other');
+  pushReportedLine(reportedItems, bs, 'Book Value / Share', 'Valor contable / Acción', 'Book Value / Share');
+  pushReportedLine(reportedItems, bs, 'Tangible Book Value / Share', 'Tangible Book Value / Share', 'Valor contable tangible / acción');
+  pushReportedLine(reportedItems, bs, 'Shares Outstanding (filing date)', 'Total de acciones fuera. en la fecha de presentación', 'Total Shares Out. on Filing Date');
+  pushReportedLine(reportedItems, bs, 'Land', 'Terrenos', 'Land');
+  pushReportedLine(reportedItems, bs, 'Full-Time Employees', 'Empleados a tiempo completo', 'Full Time Employees');
+
+  // Cash Flow coverage
+  pushReportedLine(reportedItems, cf, 'Change in Accounts Receivable', 'Cambio en cuentas por cobrar', 'Change In Accounts Receivable');
+  pushReportedLine(reportedItems, cf, 'Change in Inventory', 'Cambio en inventarios', 'Change In Inventories');
+  pushReportedLine(reportedItems, cf, 'Change in Accounts Payable', 'Cambio en cuentas por pagar', 'Change In Accounts Payable');
+  pushReportedLine(reportedItems, cf, 'Change in Unearned Revenue', 'Cambio en los ingresos no devengados', 'Change in Unearned Revenues');
+  pushReportedLine(reportedItems, cf, 'Change in Other Net Operating Assets', 'Variación en otros activos operativos netos', 'Change in Other Net Operating Assets');
+  pushReportedLine(reportedItems, cf, 'Change in Net Working Capital', 'Nota: Cambio en el capital circulante', 'Memo: Change in Net Working Capital');
+  pushReportedLine(reportedItems, cf, 'Cash Interest Paid', 'Intereses en efectivo pagados', 'Cash Interest Paid');
+  pushReportedLine(reportedItems, cf, 'Cash Taxes Paid', 'Impuestos en efectivo pagados', 'Cash Taxes Paid');
+  pushReportedLine(reportedItems, cf, 'Cash Acquisitions', 'Adquisiciones con efectivo', 'Cash Acquisitions');
+  pushReportedLine(reportedItems, cf, 'Investment in Marketable/Equity Securities', 'Inversión en valores negociables y de renta variable', 'Investment in marketable securities and equity');
+  pushReportedLine(reportedItems, cf, 'Other Investing Activities', 'Otras actividades de inversión', 'Other Investing Activities');
+  pushReportedLine(reportedItems, cf, 'Cash from Investing', 'Efectivo de la inversión', 'Cash from Investing');
+  pushReportedLine(reportedItems, cf, 'Debt Issued', 'Deuda total emitida', 'Total Debt Issued');
+  pushReportedLine(reportedItems, cf, 'Debt Repaid', 'Total de la deuda reembolsada', 'Total Debt Repaid');
+  pushReportedLine(reportedItems, cf, 'Issuance of Common Stock', 'Emisión de acciones ordinarias', 'Issuance of Common Stock');
+  pushReportedLine(reportedItems, cf, 'Dividends Paid', 'Dividendos comunes pagados', 'Dividends Paid');
+  pushReportedLine(reportedItems, cf, 'Other Financing Activities', 'Otras Actividades de Financiamiento', 'Other Financing Activities');
+  pushReportedLine(reportedItems, cf, 'Cash from Financing', 'Efectivo de Financiamiento', 'Cash from Financing');
+  pushReportedLine(reportedItems, cf, 'Net Change in Cash', 'Cambio neto en efectivo', 'Net Change in Cash');
+  pushReportedLine(reportedItems, cf, 'Cash at Beginning of Period', 'Efectivo y equivalentes de efectivo, comienzo del período', 'Cash and Cash Equivalents, Beginning of Period');
+  pushReportedLine(reportedItems, cf, 'Cash at End of Period', 'Efectivo y equivalentes de efectivo, fin de período', 'Cash and Cash Equivalents, End of Period');
+  pushReportedLine(reportedItems, cf, 'Cash Flow per Share', 'Flujo de caja por acción', 'Cash Flow per Share');
+  pushReportedLine(reportedItems, cf, 'Free Cash Flow YoY %', ['Flujo de caja libre', '% De cambio interanual'], ['Free Cash Flow', '% Change YoY']);
+
+  // Additional ratios/valuation/street/consensus lines
+  pushReportedLine(reportedItems, ratios, 'ROIC / Return on Capital %', 'Return on Capital', 'Rentabilidad sobre capital');
+  pushReportedLine(reportedItems, ratios, 'Normalized Net Margin %', 'Margen neto normalizado', 'Normalized Net Margin');
+  pushReportedLine(reportedItems, ratios, 'Levered FCF Margin %', 'Margen de flujo de efectivo libre apalancado', 'Levered Free Cash Flow Margin');
+  pushReportedLine(reportedItems, ratios, 'Unlevered FCF Margin %', 'Margen de flujo de efectivo libre sin apalancamiento', 'Unlevered Free Cash Flow Margin');
+  pushReportedLine(reportedItems, ratios, 'Operating CF / Current Liabilities', 'Flujo de caja operativo a pasivo corriente', 'Operating Cash Flow to Current Liabilities');
+  pushReportedLine(reportedItems, ratios, 'Average CCC', 'Promedio Ciclo de conversión de efectivo', 'Average Cash Conversion Cycle');
+  pushReportedLine(reportedItems, ratios, 'Average DSO', 'Promedio Días de ventas pendientes', 'Average Days Sales Outstanding');
+  pushReportedLine(reportedItems, ratios, 'Average DIO', 'Promedio Días de inventario pendiente', 'Average Days Inventory Outstanding');
+  pushReportedLine(reportedItems, ratios, 'Average DPO', 'Promedio Días a pagar pendientes', 'Average Days Payable Outstanding');
+  pushReportedLine(reportedItems, ratios, 'Debt / Equity', 'Deuda total / Fondos propios', 'Total Debt / Equity');
+  pushReportedLine(reportedItems, ratios, 'EBITDA / Interest Expense', 'EBITDA / Gastos por intereses', 'EBITDA / Interest Expense');
+  pushReportedLine(reportedItems, ratios, 'FFO Interest Coverage', 'Cobertura de intereses de FFO', 'FFO Interest Coverage');
+
+  pushReportedLine(reportedItems, vm, 'Price Factor: Price', 'Precio', 'Price Close');
+  pushReportedLine(reportedItems, vm, 'Price Factor: Market Cap', 'Capitalización bursátil', 'Market Cap');
+  pushReportedLine(reportedItems, vm, 'Price Factor: TEV', 'Valor empresarial total', 'TEV');
+  pushReportedLine(reportedItems, apt, 'Street Target Mean', 'Media del precio objetivo de las acciones', 'Average Price Target');
+  pushReportedLine(reportedItems, apt, 'Street Target Median', 'Mediana de precio de acción objetivo', 'Median Price Target');
+  pushReportedLine(reportedItems, apt, 'Street Target High', 'Precio de acción objetivo máximo', 'High Price Target');
+  pushReportedLine(reportedItems, apt, 'Street Target Low', 'Precio de acción objetivo mínimo', 'Low Price Target');
+  pushReportedLine(reportedItems, apt, 'Street Target Count', 'Precio de acción objetivo (# est.)', '# Estimates');
+  pushReportedLine(reportedItems, ce, 'Consensus Revenue (Fwd series)', 'Ingresos', 'Revenue');
+  pushReportedLine(reportedItems, ce, 'Consensus EBITDA (Fwd series)', 'EBITDA');
+  pushReportedLine(reportedItems, ce, 'Consensus EBIT (Fwd series)', 'EBIT');
+  pushReportedLine(reportedItems, ce, 'Consensus EBT (Fwd series)', 'EBT');
+  pushReportedLine(reportedItems, ce, 'Consensus Net Income (Fwd series)', 'Ingresos netos', 'Net Income');
+  pushReportedLine(reportedItems, ce, 'Consensus EPS (Fwd series)', 'EPS', 'BPA');
+  pushReportedLine(reportedItems, ce, 'Consensus FCF (Fwd series)', 'Flujo de caja libre', 'Free Cash Flow');
+  pushReportedLine(reportedItems, ce, 'Consensus Dividend/Share (Fwd series)', 'Dividendo por acción', 'Dividend per Share');
+
+  if (reportedItems.length) {
+    results.sections.push({
+      id: 'reported-lines',
+      title: 'Reported Financial Lines (TIKR Coverage)',
+      icon: '🧾',
+      grade: 'info',
+      items: reportedItems
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════
   // 12. ANALYST SENTIMENT
   // ══════════════════════════════════════════════════════════
   if (apt) {
@@ -3915,10 +4373,31 @@ export function analyze(data, profile = 'default', options = {}) {
     // High vs Low targets
     const highRow = findRowAny(
       apt,
+      'Precio de acción objetivo máximo',
       'Precio objetivo alto',
       'High Price Target'
     );
-    const lowRow = findRowAny(apt, 'Precio objetivo bajo', 'Low Price Target');
+    const lowRow = findRowAny(
+      apt,
+      'Precio de acción objetivo mínimo',
+      'Precio objetivo bajo',
+      'Low Price Target'
+    );
+    const medianRow = findRowAny(
+      apt,
+      'Mediana de precio de acción objetivo',
+      'Median Price Target'
+    );
+    const estimateCountRow = findRowAny(
+      apt,
+      'Precio de acción objetivo (# est.)',
+      '# Estimates'
+    );
+    const targetToPriceRow = findRowAny(
+      apt,
+      'Precio de acción objetivo / Precio de cierre',
+      'Target / Price'
+    );
     if (highRow && lowRow) {
       const high = getLatest(highRow);
       const low = getLatest(lowRow);
@@ -3935,6 +4414,51 @@ export function analyze(data, profile = 'default', options = {}) {
               : spread < 100
                 ? 'Moderate Spread'
                 : 'Wide Disagreement'
+          )
+        );
+      }
+    }
+
+    if (medianRow) {
+      const median = getLatest(medianRow);
+      if (median) {
+        analystItems.push(
+          makeItem(
+            'Median Price Target',
+            `Latest median target: $${median.toFixed(0)}`,
+            getRecentValues(medianRow, 6),
+            'info',
+            'Reference'
+          )
+        );
+      }
+    }
+
+    if (estimateCountRow) {
+      const estCount = getLatest(estimateCountRow);
+      if (estCount) {
+        analystItems.push(
+          makeItem(
+            'Target Coverage (# Estimates)',
+            `Latest coverage: ${estCount.toFixed(0)} analysts`,
+            getRecentValues(estimateCountRow, 6),
+            estCount >= 20 ? 'bull' : estCount >= 10 ? 'neutral' : 'neutral',
+            estCount >= 20 ? 'Well-covered' : estCount >= 10 ? 'Moderately covered' : 'Low coverage'
+          )
+        );
+      }
+    }
+
+    if (targetToPriceRow) {
+      const ratioPct = getLatest(targetToPriceRow);
+      if (ratioPct) {
+        analystItems.push(
+          makeItem(
+            'Target / Price (%)',
+            `Latest: ${ratioPct.toFixed(1)}%`,
+            getRecentValues(targetToPriceRow, 6),
+            ratioPct > 110 ? 'bull' : ratioPct > 95 ? 'neutral' : 'bear',
+            ratioPct > 110 ? 'Strong implied upside' : ratioPct > 95 ? 'Balanced' : 'Potential downside'
           )
         );
       }
