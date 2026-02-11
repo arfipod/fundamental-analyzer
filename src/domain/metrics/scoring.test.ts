@@ -5,6 +5,9 @@ import { renderDashboard, analyze, setLanguage } from './scoring';
 
 type MetricItem = {
   name?: string;
+  detail?: string;
+  explanation?: string;
+  signalText?: string;
   values?: {
     fullValues?: Array<number | null>;
   };
@@ -204,5 +207,98 @@ describe('FCF Uses Summary formatting', () => {
     expect(html).toContain('amortización de deuda 12085 (9.8 %)');
     expect(html).toContain('aumento/acumulación de caja 15018 (12.2 %)');
     expect(html).not.toContain('% )');
+  });
+});
+
+
+describe('analysis regressions for alignment and period handling', () => {
+  it('aligns cross-row ratios by date instead of index when periods are missing', () => {
+    setLanguage('en');
+    const dates = ['2020', '2021', '2022', '2023'];
+    const data = {
+      company: 'Aligned Corp',
+      sections: {
+        'Income Statement': {
+          dates,
+          rows: [
+            { label: 'Revenues', values: ['', '120', '140', '160'], dates },
+            { label: 'Cost of Goods Sold', values: ['40', '60', '70', '80'], dates }
+          ]
+        },
+        'Balance Sheet': { dates, rows: [] },
+        'Cash Flow': { dates, rows: [] },
+        Ratios: { dates, rows: [] }
+      }
+    };
+
+    const results = analyze(data, 'default', {
+      includeAnalystNoise: false
+    }) as { sections: ResultSection[] };
+
+    const costs = results.sections.find((s) => s.id === 'costs');
+    const cogsItem = costs?.items.find((item) => item.name === 'COGS as % of Revenue');
+
+    expect(cogsItem).toBeTruthy();
+    expect(cogsItem?.detail).toContain('Latest: 50.0%');
+    expect(cogsItem?.detail).toContain('Δ 0.0pp');
+    expect(cogsItem?.signalText).toBe('Stable');
+  });
+
+  it('excludes LTM from annual CAGR calculations in growth', () => {
+    setLanguage('en');
+    const dates = ['2021', '2022', '2023', 'LTM'];
+    const data = {
+      company: 'NoLTM Corp',
+      sections: {
+        'Income Statement': {
+          dates,
+          rows: [{ label: 'Revenues', values: ['100', '120', '140', '150'], dates }]
+        },
+        'Balance Sheet': { dates, rows: [] },
+        'Cash Flow': { dates, rows: [] },
+        Ratios: { dates, rows: [] }
+      }
+    };
+
+    const results = analyze(data, 'default', {
+      includeAnalystNoise: false
+    }) as { sections: ResultSection[] };
+
+    const growth = results.sections.find((s) => s.id === 'growth');
+    const revenueGrowth = growth?.items.find(
+      (item) => item.name === 'Revenue Growth (CAGR)'
+    );
+
+    expect(revenueGrowth).toBeTruthy();
+    expect(revenueGrowth?.detail).toContain('2Y CAGR');
+    expect(revenueGrowth?.explanation).toContain('Revenue: 100 → 140');
+  });
+
+  it('parses finite numeric values without requiring string inputs', () => {
+    setLanguage('en');
+    const dates = ['2021', '2022', '2023'];
+    const data = {
+      company: 'Numeric Corp',
+      sections: {
+        'Income Statement': { dates, rows: [] },
+        'Balance Sheet': { dates, rows: [] },
+        'Cash Flow': { dates, rows: [] },
+        Ratios: {
+          dates,
+          rows: [{ label: 'Current Ratio', values: [1.1, 1.4, 1.6], dates }]
+        }
+      }
+    };
+
+    const results = analyze(data, 'default', {
+      includeAnalystNoise: false
+    }) as { sections: ResultSection[] };
+
+    const debt = results.sections.find((s) => s.id === 'debt');
+    const currentRatio = debt?.items.find((item) => item.name === 'Current Ratio');
+
+    expect(currentRatio).toBeTruthy();
+    expect(currentRatio?.detail).toContain('1.60');
+    expect(currentRatio?.signalText).toMatch(/Healthy|Adequate|Very Healthy/);
   });
 });
