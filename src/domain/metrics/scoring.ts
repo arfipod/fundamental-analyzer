@@ -380,7 +380,6 @@ const DYNAMIC_I18N = {
     'Enterprise Value vs Capitalización de mercado':'Valor de empresa (EV) vs capitalización de mercado',
     'Enterprise Value vs Market Cap':'Valor de empresa (EV) vs capitalización de mercado',
     'Revenue vs Earnings Harmony':'Armonía entre ingresos y beneficios',
-    'Harmony':'armonía',
     'Revenue':'ingresos',
     'Earnings':'beneficios',
     'Revenue YoY':'Ingresos interanuales (YoY)',
@@ -2754,6 +2753,7 @@ export function renderDashboard(data, results, industrySelection = null) {
   html += `</div><div class="dashboard-panel" data-panel="industry" style="display:none">${buildIndustryPanel(data, results, industrySelection)}</div>`;
   d.innerHTML = html;
   updateToggleSectionsButton();
+  return html;
 }
 
 

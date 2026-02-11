@@ -1,9 +1,12 @@
 import { I18N } from './en';
-import type { SupportedLang, TranslationKey } from './keys';
+import type { SupportedLang } from './keys';
 
 export const DEFAULT_LANG: SupportedLang = 'es';
 
-export function translate(lang: SupportedLang, key: TranslationKey | string, fallback = ''): string {
-  const dictionary = I18N[lang] ?? I18N.en;
-  return dictionary[key] ?? I18N.en[key] ?? fallback || key;
+type Dict = Record<string, string>;
+
+export function translate(lang: SupportedLang, key: string, fallback = ''): string {
+  const dictionary: Dict = (I18N[lang] ?? I18N.en) as Dict;
+  const english: Dict = I18N.en as Dict;
+  return dictionary[key] ?? english[key] ?? fallback ?? key;
 }

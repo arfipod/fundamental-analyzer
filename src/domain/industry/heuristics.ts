@@ -1,5 +1,7 @@
 import { INDUSTRY_PROFILES } from './data';
 
+const profiles = INDUSTRY_PROFILES as Record<string, { valuation: string; kpis: string }>;
+
 export function getIndustryHeuristic(profile: string) {
-  return INDUSTRY_PROFILES[profile] ?? null;
+  return profiles[profile] ?? null;
 }

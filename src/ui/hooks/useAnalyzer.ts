@@ -5,6 +5,16 @@ import { buildScorecard } from '../../application/buildScorecard';
 import { GICS_INDUSTRIES } from '../../domain/industry/data';
 import { renderDashboard } from '../../domain/metrics/scoring';
 
+type ParsedSection = { rows?: unknown[] };
+type ParsedData = { sections?: Record<string, ParsedSection> };
+type RenderDashboardFn = (
+  data: unknown,
+  results: unknown,
+  industrySelection?: unknown
+) => string;
+
+const renderDashboardTyped = renderDashboard as unknown as RenderDashboardFn;
+
 export function useAnalyzer() {
   const [dashboardHtml, setDashboardHtml] = useState('');
   const [error, setError] = useState('');
@@ -26,10 +36,10 @@ export function useAnalyzer() {
     }
 
     try {
-      const data = parseInput(raw);
+      const data = parseInput(raw) as ParsedData;
       const secCount = Object.keys(data.sections || {}).length;
       const rowCount = Object.values(data.sections || {}).reduce(
-        (s: number, sec: any) => s + (sec?.rows?.length || 0),
+        (s: number, sec: ParsedSection) => s + (sec?.rows?.length || 0),
         0
       );
       if (secCount === 0 || rowCount === 0) {
@@ -47,7 +57,7 @@ export function useAnalyzer() {
       const engineProfile = industrySelection?.profile ?? 'default';
 
       const results = runAnalysis(data, engineProfile, options);
-      const html = renderDashboard(data, results, industrySelection);
+      const html = renderDashboardTyped(data, results, industrySelection ?? undefined);
       setDashboardHtml(buildScorecard(html).dashboardHtml);
     } catch (err) {
       console.error(err);
