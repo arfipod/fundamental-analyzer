@@ -67,6 +67,7 @@ export function AnalyzerPage() {
           </div>
           {error ? <div id="error-msg" style={{ display: 'block' }}>{error}</div> : <div id="error-msg" />}
         </div>
+        <footer className="app-footer">Made with 💙 by arrf</footer>
       </div>
     );
   }
@@ -142,6 +143,7 @@ export function AnalyzerPage() {
           <p><strong>Focus metrics:</strong> {dashboardVm.industryPanel.highlightMetrics.join(', ')}</p>
         </section>
       )}
+      <footer className="app-footer">Made with 💙 by arrf</footer>
     </div>
   );
 }

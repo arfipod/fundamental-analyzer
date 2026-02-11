@@ -616,3 +616,12 @@ body {
   padding: 1rem;
   color: var(--text-dim);
 }
+
+
+.app-footer {
+  margin-top: 1.75rem;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  opacity: 0.9;
+}
