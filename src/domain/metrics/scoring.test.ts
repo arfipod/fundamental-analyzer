@@ -431,6 +431,41 @@ describe('analysis regressions for alignment and period handling', () => {
   });
 
 
+
+  it('adds DSO vs receivables turnover consistency warning when inverse relation breaks', () => {
+    setLanguage('en');
+    const dates = ['2022', '2023', '2024'];
+    const data = {
+      company: 'AR Mismatch Ltd',
+      sections: {
+        'Income Statement': { dates, rows: [{ label: 'Revenues', values: ['100', '120', '140'], dates }] },
+        'Balance Sheet': { dates, rows: [] },
+        Ratios: {
+          dates,
+          rows: [
+            { label: 'DSO', values: ['40', '42', '80'], dates },
+            { label: 'Receivables Turnover', values: ['9', '8.5', '12'], dates }
+          ]
+        },
+        'Cash Flow': { dates, rows: [] },
+        'Valuation Multiples': { dates, rows: [] }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false }) as {
+      sections: ResultSection[];
+    };
+
+    const efficiency = results.sections.find((s) => s.id === 'efficiency');
+    const consistency = efficiency?.items.find(
+      (i) => i.name === 'DSO vs Receivables Turnover Consistency Check'
+    );
+
+    expect(consistency).toBeTruthy();
+    expect(consistency?.signal).toBe('info');
+    expect(consistency?.signalText).toContain('Definition mismatch');
+  });
+
   it('adds FCF yield vs P/FCF consistency warning when inverse relation breaks', () => {
     setLanguage('en');
     const dates = ['2022', '2023', '2024'];

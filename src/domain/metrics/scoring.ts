@@ -4114,9 +4114,11 @@ export function analyze(data, profile = 'default', options = {}) {
     'Days Sales Outstanding',
     'DSO'
   );
+  let dsoLatest = null;
   if (dsoRow) {
     const vals = getRecentValues(dsoRow, 6);
     const latest = vals[vals.length - 1];
+    dsoLatest = latest;
     if (latest != null) {
       effItems.push(
         makeItem(
@@ -4133,6 +4135,27 @@ export function analyze(data, profile = 'default', options = {}) {
                 : 'Slow'
         )
       );
+    }
+  }
+
+  if (Number.isFinite(dsoLatest) && recTurnRow) {
+    const recVals = getRecentValues(recTurnRow, 6);
+    const recLatest = recVals[recVals.length - 1];
+    if (Number.isFinite(recLatest) && recLatest > 0) {
+      const impliedDso = 365 / recLatest;
+      const spreadDays = Math.abs(dsoLatest - impliedDso);
+      if (spreadDays > 10) {
+        effItems.push(
+          makeItem(
+            'DSO vs Receivables Turnover Consistency Check',
+            `DSO ${dsoLatest.toFixed(1)} days vs implied ${impliedDso.toFixed(1)} days from AR turnover ${recLatest.toFixed(2)}x (Δ ${spreadDays.toFixed(1)} days)`,
+            [dsoLatest, impliedDso],
+            'info',
+            'Definition mismatch ⚠️',
+            'DSO should roughly align with 365 / Receivables Turnover. Recheck period basis (TTM/FY), average-vs-ending receivables, and denominator mapping.'
+          )
+        );
+      }
     }
   }
 
