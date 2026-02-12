@@ -1825,6 +1825,57 @@ const METRIC_INTERPRETATION_EXACT = {
         '¿El DPO alto es sostenible sin fricción en la cadena de suministro?'
     }
   }
+
+  ,
+  'r&d as % of revenue': {
+    en: {
+      definition: 'R&D intensity shows innovation investment relative to revenue.',
+      lookFor:
+        'Track trend, peer comparison, and whether spending translates into product strength and durable margins.',
+      thresholds:
+        'No universal threshold; high-tech/healthcare structurally require higher R&D than mature sectors.',
+      pitfalls:
+        'Very low R&D can erode moat; very high R&D without monetization can pressure returns.',
+      nextQuestions:
+        'Is R&D spend creating durable revenue and margin outcomes?'
+    },
+    es: {
+      definition: 'I+D sobre ingresos mide la intensidad de inversión en innovación.',
+      lookFor:
+        'Seguir tendencia, comparación con peers y si se traduce en producto/foso y márgenes sostenibles.',
+      thresholds:
+        'No hay umbral universal; tech/salud suelen requerir más I+D que sectores maduros.',
+      pitfalls:
+        'I+D muy baja puede erosionar el foso; muy alta sin retorno puede presionar rentabilidad.',
+      nextQuestions:
+        '¿El gasto en I+D se está convirtiendo en ingresos/márgenes duraderos?'
+    }
+  },
+  'operating expenses as % of gross profit': {
+    en: {
+      definition: 'Measures how much gross profit is consumed by operating structure costs.',
+      lookFor:
+        'Generally lower is better if growth quality is preserved.',
+      thresholds:
+        'Trend and peer context matter; sustained rises usually reduce operating resilience.',
+      pitfalls:
+        'Planned growth investment can lift ratio temporarily; verify payback quality.',
+      nextQuestions:
+        'Is higher OpEx intensity temporary investment or structural inefficiency?'
+    },
+    es: {
+      definition: 'Mide cuánto beneficio bruto consume la estructura de gastos operativos.',
+      lookFor:
+        'En general, más bajo es mejor si no compromete el crecimiento/foso.',
+      thresholds:
+        'Importa tendencia + peers; subidas sostenidas suelen reducir resiliencia operativa.',
+      pitfalls:
+        'Fases de inversión deliberada pueden elevar el ratio temporalmente; validar payback.',
+      nextQuestions:
+        '¿El mayor OpEx es inversión temporal o ineficiencia estructural?'
+    }
+  }
+
 } as const;
 
 function metricLibraryEntry(name = '') {
@@ -2889,20 +2940,43 @@ export function analyze(data, profile = 'default', options = {}) {
   if (roeRow) {
     const vals = getRecentValues(roeRow, 10);
     const latest = vals[vals.length - 1];
+    const roaRowForRoe = findRowAny(
+      ratios,
+      'Rentabilidad sobre activos',
+      'ROA',
+      'Return on Assets'
+    );
+    const roaForRoe = getLatest(roaRowForRoe);
+    const equityMultiplierForRoe =
+      latest !== null && roaForRoe !== null && roaForRoe !== 0
+        ? latest / roaForRoe
+        : null;
+    const leverageInflatedRoe =
+      equityMultiplierForRoe !== null && equityMultiplierForRoe > 4;
     moatItems.push(
       makeItem(
         'ROE (Return on Equity)',
         `Latest: ${latest?.toFixed(1)}%`,
         vals,
-        latest > 20 ? 'bull' : latest > 12 ? 'neutral' : 'bear',
-        latest > 25
-          ? 'Outstanding'
+        leverageInflatedRoe
+          ? 'neutral'
           : latest > 20
-            ? 'Excellent'
+            ? 'bull'
             : latest > 12
-              ? 'Good'
-              : 'Below Average',
-        'Beware: high leverage can inflate ROE artificially'
+              ? 'neutral'
+              : 'bear',
+        leverageInflatedRoe
+          ? 'High ROE but leverage-inflated'
+          : latest > 25
+            ? 'Outstanding'
+            : latest > 20
+              ? 'Excellent'
+              : latest > 12
+                ? 'Good'
+                : 'Below Average',
+        leverageInflatedRoe
+          ? 'ROE appears high, but equity multiplier suggests leverage-driven inflation. Validate with ROA/ROIC.'
+          : 'Beware: high leverage can inflate ROE artificially'
       )
     );
   }
@@ -3091,14 +3165,26 @@ export function analyze(data, profile = 'default', options = {}) {
           'Accounts Receivable (Days)',
           `~${arDays.toFixed(0)} days — Trend: ${trend}`,
           pairs.map((p) => p.a),
-          arDays < 45 ? 'bull' : arDays < 75 ? 'neutral' : 'bear',
-          arDays < 30
-            ? 'Quick Collection'
+          trend === 'up'
+            ? arDays < 45
+              ? 'neutral'
+              : 'bear'
             : arDays < 45
-              ? 'Healthy'
+              ? 'bull'
               : arDays < 75
-                ? 'Normal'
-                : 'Slow Collection'
+                ? 'neutral'
+                : 'bear',
+          trend === 'up'
+            ? arDays < 45
+              ? 'Rising collection days (watch)'
+              : 'Collections weakening'
+            : arDays < 30
+              ? 'Quick Collection'
+              : arDays < 45
+                ? 'Healthy'
+                : arDays < 75
+                  ? 'Normal'
+                  : 'Slow Collection'
         )
       );
     }
@@ -3154,7 +3240,7 @@ export function analyze(data, profile = 'default', options = {}) {
           [],
           pct < 15 ? 'bull' : pct < 35 ? 'neutral' : 'bear',
           pct < 10
-            ? 'Organic Growth'
+            ? 'Low acquisition-intangibles concentration'
             : pct < 15
               ? 'Low'
               : pct < 35
@@ -3212,14 +3298,14 @@ export function analyze(data, profile = 'default', options = {}) {
         'Retained Earnings',
         `Latest: $${latest?.toFixed(0)}M — Trend: ${trend}`,
         vals,
-        trend === 'up' && latest > 0 ? 'bull' : latest > 0 ? 'neutral' : 'bear',
+        trend === 'up' && latest > 0 ? 'bull' : latest > 0 ? 'neutral' : 'neutral',
         latest < 0
-          ? 'Accumulated Deficit ⚠️'
+          ? 'Needs context (capital returns vs losses)'
           : trend === 'up'
             ? 'Growing'
             : 'Flat/Declining',
         latest < 0
-          ? 'Negative retained earnings = company has not been profitable historically'
+          ? 'Negative retained earnings may reflect cumulative buybacks/dividends, not necessarily historical unprofitability. Confirm with NI history, buybacks, dividends, and equity trend.'
           : ''
       )
     );
@@ -4192,6 +4278,13 @@ export function analyze(data, profile = 'default', options = {}) {
     'Enterprise Value',
     'TEV'
   );
+  const mcLatestForValidation = getLatest(mcRow);
+  const evLatestForValidation = getLatest(evRow);
+  const evIsValid =
+    mcLatestForValidation !== null &&
+    evLatestForValidation !== null &&
+    mcLatestForValidation > 0 &&
+    evLatestForValidation > 0;
   if (mcRow && evRow) {
     const mc = getLatest(mcRow);
     const ev = getLatest(evRow);
@@ -4241,7 +4334,7 @@ export function analyze(data, profile = 'default', options = {}) {
     'NTM EV / Revenues',
     'Valor de empresa / ingresos totales de la empresa NTM'
   );
-  if (evRevenueNtmRow) {
+  if (evIsValid && evRevenueNtmRow) {
     const vals = getRecentValues(evRevenueNtmRow, 8);
     const latest = vals[vals.length - 1];
     valItems.push(
@@ -4331,7 +4424,7 @@ export function analyze(data, profile = 'default', options = {}) {
     'NTM Total Enterprise Value / EBITDA',
     'EV/EBITDA'
   );
-  if (evEbitdaRow) {
+  if (evIsValid && evEbitdaRow) {
     const vals = getRecentValues(evEbitdaRow, 8);
     const latest = vals[vals.length - 1];
     const avgVal = avg(vals);
@@ -4363,7 +4456,7 @@ export function analyze(data, profile = 'default', options = {}) {
     'EV/EBIT',
     'TEV / EBIT'
   );
-  if (evEbitRow) {
+  if (evIsValid && evEbitRow) {
     const vals = getRecentValues(evEbitRow, 8);
     const latest = vals[vals.length - 1];
     valItems.push(
@@ -4460,6 +4553,20 @@ export function analyze(data, profile = 'default', options = {}) {
     const latest = vals[vals.length - 1];
     if (latest === null || latest === undefined) return;
     const isNcavMetric = String(name) === 'Price / NCAV (LTM)';
+    const isEvMultiple = String(name).startsWith('EV / ');
+    if (isEvMultiple && !evIsValid) {
+      valItems.push(
+        makeItem(
+          String(name),
+          'N/A',
+          [],
+          'info',
+          'N/A due to invalid EV/MC ⚠️',
+          'EV-based multiple disabled because EV/Market Cap input is invalid.'
+        )
+      );
+      return;
+    }
     if (isNcavMetric && latest <= 0) {
       valItems.push(
         makeItem(
@@ -4759,18 +4866,23 @@ export function analyze(data, profile = 'default', options = {}) {
     if (mc && mc > 0) {
       const totalYield = ((bb + div) / mc) * 100;
       if (totalYield > 0.5) {
+        const extremeYield = totalYield > 300;
         shItems.push(
           makeItem(
             'Total Shareholder Yield',
             `${totalYield.toFixed(1)}% (Buybacks: $${bb.toFixed(0)}M + Dividends: $${div.toFixed(0)}M)`,
             [],
-            totalYield > 5 ? 'bull' : totalYield > 2 ? 'neutral' : 'neutral',
-            totalYield > 5
-              ? 'Excellent Capital Return'
-              : totalYield > 2
-                ? 'Good'
-                : 'Modest',
-            'Buybacks + dividends as % of market cap'
+            extremeYield ? 'info' : totalYield > 5 ? 'bull' : 'neutral',
+            extremeYield
+              ? 'Invalid shareholder return datapoint ⚠️'
+              : totalYield > 5
+                ? 'Excellent Capital Return'
+                : totalYield > 2
+                  ? 'Good'
+                  : 'Modest',
+            extremeYield
+              ? 'Likely scaling/formula issue (market cap or units). Signal omitted.'
+              : 'Buybacks + dividends as % of market cap'
           )
         );
       }
