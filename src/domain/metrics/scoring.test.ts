@@ -351,6 +351,42 @@ describe('analysis regressions for alignment and period handling', () => {
 
 
 
+
+  it('adds gross margin vs COGS consistency warning when they do not sum near 100%', () => {
+    setLanguage('en');
+    const dates = ['2022', '2023', '2024'];
+    const data = {
+      company: 'Margin Mapping Inc',
+      sections: {
+        'Income Statement': {
+          dates,
+          rows: [
+            { label: 'Revenues', values: ['100', '120', '150'], dates },
+            { label: '% Gross Margins', values: ['60', '62', '65'], dates },
+            { label: 'Cost of Goods Sold', values: ['55', '66', '82.5'], dates }
+          ]
+        },
+        'Balance Sheet': { dates, rows: [] },
+        Ratios: { dates, rows: [] },
+        'Cash Flow': { dates, rows: [] },
+        'Valuation Multiples': { dates, rows: [] }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false }) as {
+      sections: ResultSection[];
+    };
+
+    const costs = results.sections.find((s) => s.id === 'costs');
+    const consistency = costs?.items.find(
+      (i) => i.name === 'Gross Margin vs COGS Consistency Check'
+    );
+
+    expect(consistency).toBeTruthy();
+    expect(consistency?.signal).toBe('info');
+    expect(consistency?.signalText).toContain('Definition mismatch');
+  });
+
   it('marks key non-EV valuation multiples as data issues when non-positive', () => {
     setLanguage('en');
     const dates = ['2022', '2023', '2024'];

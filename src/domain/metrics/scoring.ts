@@ -2606,10 +2606,12 @@ export function analyze(data, profile = 'default', options = {}) {
     'Cost of Goods Sold',
     'COGS'
   );
+  let latestCogsPct = null;
   if (cogsRow && revenueRow) {
     const { series } = ratioPctSeries(cogsRow, revenueRow, 6);
     if (series.length >= 2) {
       const latestPct = series[series.length - 1];
+      latestCogsPct = latestPct;
       const firstPct = series[0];
       const delta = latestPct - firstPct;
       costItems.push(
@@ -2621,6 +2623,27 @@ export function analyze(data, profile = 'default', options = {}) {
           delta < -2 ? 'Improving' : delta < 2 ? 'Stable' : 'Rising Costs'
         )
       );
+    }
+  }
+
+  if (grossSrc && Number.isFinite(latestCogsPct)) {
+    const grossVals = getRecentValues(grossSrc, 6);
+    const grossLatest = grossVals[grossVals.length - 1];
+    if (Number.isFinite(grossLatest)) {
+      const sum = grossLatest + latestCogsPct;
+      const drift = Math.abs(sum - 100);
+      if (drift > 5) {
+        costItems.push(
+          makeItem(
+            'Gross Margin vs COGS Consistency Check',
+            `Gross ${grossLatest.toFixed(1)}% + COGS ${latestCogsPct.toFixed(1)}% = ${sum.toFixed(1)}% (Δ ${drift.toFixed(1)}pp vs 100%)`,
+            [grossLatest, latestCogsPct],
+            'info',
+            'Definition mismatch ⚠️',
+            'Gross margin and COGS% should roughly sum to 100% under consistent definitions. Recheck COGS mapping, period alignment, and denominator basis.'
+          )
+        );
+      }
     }
   }
 
