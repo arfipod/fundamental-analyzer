@@ -5,17 +5,17 @@ import {
   renderDashboard,
   analyze,
   setLanguage,
-  onLanguageChange
+  onLanguageChange,
+  parseTIKR
 } from './scoring';
 
 type MetricItem = {
   name?: string;
   detail?: string;
   explanation?: string;
+  signal?: string;
   signalText?: string;
-  values?: {
-    fullValues?: Array<number | null>;
-  };
+  values?: any;
 };
 
 type ResultSection = {
@@ -626,5 +626,46 @@ describe('expanded TIKR metric coverage regressions', () => {
     expect(
       debt?.items.some((item) => item.name === 'Total Debt / Capital')
     ).toBe(true);
+  });
+});
+
+
+describe('cost and null-safety regressions', () => {
+  it('stores cost ratio metrics as percentage series, not absolute amounts', () => {
+    setLanguage('en');
+    const dates = ['2022', '2023', '2024'];
+    const data = {
+      company: 'Ratio Corp',
+      sections: {
+        'Income Statement': {
+          dates,
+          rows: [
+            { label: 'Revenues', values: ['100', '120', '150'], dates },
+            { label: 'Cost of Goods Sold', values: ['40', '54', '60'], dates },
+            { label: 'Selling General & Admin Expenses', values: ['20', '24', '30'], dates }
+          ]
+        },
+        'Balance Sheet': { dates, rows: [] },
+        'Cash Flow': { dates, rows: [] },
+        Ratios: { dates, rows: [] }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false }) as { sections: ResultSection[] };
+    const costs = results.sections.find((section) => section.id === 'costs');
+    const cogs = costs?.items.find((item) => item.name === 'COGS as % of Revenue');
+
+    expect(cogs).toBeTruthy();
+    expect(cogs?.values).toEqual([40, 45, 40]);
+  });
+
+  it('parses non-US currency prefixes in Price lines', () => {
+    const parsed = parseTIKR(`# TEST – Example
+Price: CA$ 123.45
+Extracted: 2025-01-01
+Period: Annual`);
+
+    expect(parsed.price).toBe('CA$123.45');
+    expect(parsed.priceNum).toBe(123.45);
   });
 });
