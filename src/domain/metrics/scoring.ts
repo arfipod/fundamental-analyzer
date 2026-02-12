@@ -6,7 +6,23 @@ function asLang(value) {
   return value === 'en' ? 'en' : 'es';
 }
 
-let currentLang = asLang(localStorage.getItem(STORAGE_KEY) || DEFAULT_LANG);
+function safeGetStorage(key, fallback = null) {
+  try {
+    return localStorage.getItem(key) || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function safeSetStorage(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // No-op: storage may be unavailable in some execution contexts.
+  }
+}
+
+let currentLang = asLang(safeGetStorage(STORAGE_KEY, DEFAULT_LANG));
 const langListeners = new Set();
 
 export function getCurrentLang() {
@@ -52,7 +68,7 @@ export function onLanguageChange(cb) {
 
 export function setLanguage(lang) {
   currentLang = asLang(lang);
-  localStorage.setItem(STORAGE_KEY, currentLang);
+  safeSetStorage(STORAGE_KEY, currentLang);
   applyLocalization();
   const langSel = document.getElementById('langSelect');
   if (langSel) langSel.value = currentLang;
@@ -567,19 +583,24 @@ const DYNAMIC_I18N = {
 const FIN_LABEL_ENTRIES = Object.entries(FINANCIAL_LABEL_EN_ES).sort(
   (a, b) => b[0].length - a[0].length
 );
-const FIN_LABEL_ENTRIES_REVERSED = FIN_LABEL_ENTRIES.map(([en, es]) => [es, en]);
+const reverseAndSortByFromLen = (entries) =>
+  entries
+    .map(([from, to]) => [to, from])
+    .sort((a, b) => b[0].length - a[0].length);
+
+const FIN_LABEL_ENTRIES_REVERSED = reverseAndSortByFromLen(FIN_LABEL_ENTRIES);
 const METRIC_ENTRIES = Object.entries(DYNAMIC_I18N.metricNames).sort(
   (a, b) => b[0].length - a[0].length
 );
-const METRIC_ENTRIES_REVERSED = METRIC_ENTRIES.map(([en, es]) => [es, en]);
+const METRIC_ENTRIES_REVERSED = reverseAndSortByFromLen(METRIC_ENTRIES);
 const SECTION_ENTRIES = Object.entries(DYNAMIC_I18N.sectionTitles).sort(
   (a, b) => b[0].length - a[0].length
 );
-const SECTION_ENTRIES_REVERSED = SECTION_ENTRIES.map(([en, es]) => [es, en]);
+const SECTION_ENTRIES_REVERSED = reverseAndSortByFromLen(SECTION_ENTRIES);
 const FRAG_ENTRIES = Object.entries(DYNAMIC_I18N.fragments).sort(
   (a, b) => b[0].length - a[0].length
 );
-const FRAG_ENTRIES_REVERSED = FRAG_ENTRIES.map(([en, es]) => [es, en]);
+const FRAG_ENTRIES_REVERSED = reverseAndSortByFromLen(FRAG_ENTRIES);
 
 function compileReplacers(entries) {
   return entries.map(([from, to]) => {
@@ -591,8 +612,8 @@ function compileReplacers(entries) {
     }
     const escaped = escapeRegExp(from);
     const re = new RegExp(
-      `(^|[^A-Za-z0-9_])(${escaped})(?=$|[^A-Za-z0-9_])`,
-      'g'
+      `(^|[^\\p{L}\\p{N}_])(${escaped})(?=$|[^\\p{L}\\p{N}_])`,
+      'gu'
     );
     return {
       replace: (text) => text.replace(re, (_, lead) => `${lead}${to}`)
@@ -724,6 +745,35 @@ function alignByDate(rowA, rowB, n = 6, options = {}) {
     .map((p) => ({ date: p.date, a: p.value, b: bMap.get(p.date) ?? null }))
     .filter((p) => p.b !== null)
     .slice(-n);
+}
+
+function ratioPctSeries(numerRow, denomRow, n = 6, options = {}) {
+  const pairs = alignByDate(numerRow, denomRow, n, options);
+  const series = pairs
+    .map((p) =>
+      p.b ? (Math.abs(p.a) / Math.abs(p.b)) * 100 : null
+    )
+    .filter((v) => v !== null);
+  series.labels = pairs.map((p) => p.date);
+  return { pairs, series };
+}
+
+function classifyHigher(latest, bull, neutral, labels = {}) {
+  if (latest === null || latest === undefined || Number.isNaN(latest)) {
+    return {
+      signal: 'info',
+      label: labels.info || 'Not enough data'
+    };
+  }
+  if (latest >= bull) return { signal: 'bull', label: labels.bull || 'Strong' };
+  if (latest >= neutral)
+    return { signal: 'neutral', label: labels.neutral || 'OK' };
+  return { signal: 'bear', label: labels.bear || 'Weak' };
+}
+
+function hasNonPositiveEquity(equityRow, n = 2) {
+  const recent = toSeries(equityRow).slice(-Math.max(1, n));
+  return recent.length > 0 && recent.some((p) => p.value <= 0);
 }
 
 function splitMarkdownRow(row) {
@@ -1034,10 +1084,10 @@ export function parseTIKR(raw) {
   data.company = company || data.company || firstLineRaw;
 
   for (const l of lines) {
-    const pm = l.match(/Price:\s*(US\$[\d.,]+)/);
+    const pm = l.match(/Price:\s*([A-Z]{0,3}\$|US\$|CA\$|€|£|¥)?\s*([\d.,]+)/i);
     if (pm) {
-      data.price = pm[1];
-      data.priceNum = parseNumber(pm[1]);
+      data.price = `${(pm[1] || '').trim()}${pm[2]}`.trim();
+      data.priceNum = parseNumber(data.price);
     }
     const dm = l.match(/Extracted:\s*(.+)/);
     if (dm) data.extractDate = dm[1];
@@ -1047,9 +1097,9 @@ export function parseTIKR(raw) {
 
   // Try to capture price from the headline if "Price:" line doesn't contain it
   if (!data.price) {
-    const p = firstLineRaw.match(/US\$\s*[\d.,]+/);
+    const p = firstLineRaw.match(/(?:[A-Z]{0,3}\$|US\$|CA\$|€|£|¥)?\s*[\d.,]+/);
     if (p) {
-      data.price = p[0].replace(/\s+/g, ''); // "US$188.29"
+      data.price = p[0].replace(/\s+/g, '');
       data.priceNum = parseNumber(p[0]);
     }
   }
@@ -1217,7 +1267,7 @@ function computeEquityMultiplierFromBalance(assetsRow, equityRow, n = 2) {
   if (!pairs.length) return null;
   const avgAssets = avg(pairs.map((p) => p.a));
   const avgEquity = avg(pairs.map((p) => p.b));
-  if (avgAssets === null || avgEquity === null || avgEquity === 0) return null;
+  if (avgAssets === null || avgEquity === null || avgEquity <= 0) return null;
   return avgAssets / avgEquity;
 }
 
@@ -2836,23 +2886,25 @@ export function analyze(data, profile = 'default', options = {}) {
     const latest = vals[vals.length - 1];
     const trend = getTrend(vals);
     const sd = stddev(vals);
+    const grossClass = classifyHigher(
+      latest,
+      mt('gross_margin', 'bull'),
+      mt('gross_margin', 'neutral'),
+      { info: 'Not enough data', neutral: 'Decent', bear: 'Thin' }
+    );
     marginItems.push(
       makeItem(
         'Gross Margin',
-        `Latest: ${latest?.toFixed(1)}% — Trend: ${trend}`,
+        latest != null
+          ? `Latest: ${latest.toFixed(1)}% — Trend: ${trend}`
+          : 'Not enough data',
         vals,
-        latest > mt('gross_margin', 'bull')
-          ? 'bull'
-          : latest > mt('gross_margin', 'neutral')
-            ? 'neutral'
-            : 'bear',
-        latest > mt('gross_margin', 'bull') + 10
+        grossClass.signal,
+        latest != null && latest > mt('gross_margin', 'bull') + 10
           ? 'Wide Moat'
-          : latest > mt('gross_margin', 'bull')
+          : latest != null && latest > mt('gross_margin', 'bull')
             ? 'Strong'
-            : latest > mt('gross_margin', 'neutral')
-              ? 'Decent'
-              : 'Thin',
+            : grossClass.label,
         sd !== null
           ? `Stability: σ=${sd.toFixed(1)}pp (${sd < 3 ? 'very stable' : sd < 6 ? 'stable' : 'volatile'})`
           : ''
@@ -2873,19 +2925,24 @@ export function analyze(data, profile = 'default', options = {}) {
     const vals = getRecentValues(opSrc, 10);
     const latest = vals[vals.length - 1];
     const trend = getTrend(vals);
+    const opClass = classifyHigher(latest, 20, 10, {
+      info: 'Not enough data',
+      neutral: 'Healthy',
+      bear: 'Compressed'
+    });
     marginItems.push(
       makeItem(
         'Operating Margin (EBIT)',
-        `Latest: ${latest?.toFixed(1)}% — Trend: ${trend}`,
+        latest != null
+          ? `Latest: ${latest.toFixed(1)}% — Trend: ${trend}`
+          : 'Not enough data',
         vals,
-        latest > 20 ? 'bull' : latest > 10 ? 'neutral' : 'bear',
-        latest > 25
+        opClass.signal,
+        latest != null && latest > 25
           ? 'Best-in-class'
-          : latest > 20
+          : latest != null && latest > 20
             ? 'Excellent'
-            : latest > 10
-              ? 'Healthy'
-              : 'Compressed'
+            : opClass.label
       )
     );
   }
@@ -2894,19 +2951,18 @@ export function analyze(data, profile = 'default', options = {}) {
   if (ebitdaMarginRow) {
     const vals = getRecentValues(ebitdaMarginRow, 10);
     const latest = vals[vals.length - 1];
+    const ebitdaClass = classifyHigher(latest, 25, 15, {
+      info: 'Not enough data',
+      neutral: 'Fair',
+      bear: 'Low'
+    });
     marginItems.push(
       makeItem(
         'EBITDA Margin',
-        `Latest: ${latest?.toFixed(1)}%`,
+        latest != null ? `Latest: ${latest.toFixed(1)}%` : 'Not enough data',
         vals,
-        latest > 25 ? 'bull' : latest > 15 ? 'neutral' : 'bear',
-        latest > 30
-          ? 'Elite'
-          : latest > 25
-            ? 'Strong'
-            : latest > 15
-              ? 'Fair'
-              : 'Low'
+        ebitdaClass.signal,
+        latest != null && latest > 30 ? 'Elite' : latest != null && latest > 25 ? 'Strong' : ebitdaClass.label
       )
     );
   }
@@ -2917,19 +2973,22 @@ export function analyze(data, profile = 'default', options = {}) {
   if (netMSrc) {
     const vals = getRecentValues(netMSrc, 10);
     const latest = vals[vals.length - 1];
+    const netMarginClass = classifyHigher(latest, 15, 8, {
+      info: 'Not enough data',
+      neutral: 'OK',
+      bear: 'Low'
+    });
     marginItems.push(
       makeItem(
         'Net Profit Margin',
-        `Latest: ${latest?.toFixed(1)}%`,
+        latest != null ? `Latest: ${latest.toFixed(1)}%` : 'Not enough data',
         vals,
-        latest > 15 ? 'bull' : latest > 8 ? 'neutral' : 'bear',
-        latest > 20
+        netMarginClass.signal,
+        latest != null && latest > 20
           ? 'Exceptional'
-          : latest > 15
+          : latest != null && latest > 15
             ? 'High Quality'
-            : latest > 8
-              ? 'OK'
-              : 'Low'
+            : netMarginClass.label
       )
     );
   }
@@ -2944,19 +3003,22 @@ export function analyze(data, profile = 'default', options = {}) {
   if (fcfMSrc) {
     const vals = getRecentValues(fcfMSrc, 10);
     const latest = vals[vals.length - 1];
+    const fcfMarginClass = classifyHigher(latest, 20, 10, {
+      info: 'Not enough data',
+      neutral: 'Solid',
+      bear: 'Weak'
+    });
     marginItems.push(
       makeItem(
         'FCF Margin',
-        `Latest: ${latest?.toFixed(1)}%`,
+        latest != null ? `Latest: ${latest.toFixed(1)}%` : 'Not enough data',
         vals,
-        latest > 20 ? 'bull' : latest > 10 ? 'neutral' : 'bear',
-        latest > 25
+        fcfMarginClass.signal,
+        latest != null && latest > 25
           ? 'Cash Machine'
-          : latest > 20
+          : latest != null && latest > 20
             ? 'Excellent'
-            : latest > 10
-              ? 'Solid'
-              : 'Weak'
+            : fcfMarginClass.label
       )
     );
   }
@@ -3013,8 +3075,8 @@ export function analyze(data, profile = 'default', options = {}) {
     'COGS'
   );
   if (cogsRow && revenueRow) {
-    const pairs = alignByDate(cogsRow, revenueRow, 6);
-    if (pairs.length >= 2) {
+    const { pairs, series } = ratioPctSeries(cogsRow, revenueRow, 6);
+    if (series.length >= 2) {
       const latestPct =
         (Math.abs(pairs[pairs.length - 1].a) /
           Math.abs(pairs[pairs.length - 1].b)) *
@@ -3025,7 +3087,7 @@ export function analyze(data, profile = 'default', options = {}) {
         makeItem(
           'COGS as % of Revenue',
           `Latest: ${latestPct.toFixed(1)}% (Δ ${delta > 0 ? '+' : ''}${delta.toFixed(1)}pp)`,
-          pairs.map((p) => p.a),
+          pairs.map((p) => (p.a / p.b) * 100),
           delta < -2 ? 'bull' : delta < 2 ? 'neutral' : 'bear',
           delta < -2 ? 'Improving' : delta < 2 ? 'Stable' : 'Rising Costs'
         )
@@ -3075,17 +3137,17 @@ export function analyze(data, profile = 'default', options = {}) {
     'admin'
   ]);
   if (sgaRow && revenueRow) {
-    const pairs = alignByDate(sgaRow, revenueRow, 6);
-    if (pairs.length >= 2) {
+    const { series } = ratioPctSeries(sgaRow, revenueRow, 6);
+    if (series.length >= 2) {
       const latestPct =
-        (Math.abs(pairs[pairs.length - 1].a) / pairs[pairs.length - 1].b) * 100;
-      const firstPct = (Math.abs(pairs[0].a) / pairs[0].b) * 100;
+        series[series.length - 1];
+      const firstPct = series[0];
       const delta = latestPct - firstPct;
       costItems.push(
         makeItem(
           'SG&A as % of Revenue',
           `Latest: ${latestPct.toFixed(1)}% (Δ ${delta > 0 ? '+' : ''}${delta.toFixed(1)}pp)`,
-          pairs.map((p) => Math.abs(p.a)),
+          series,
           delta < -1 ? 'bull' : latestPct < 25 ? 'neutral' : 'bear',
           delta < -1
             ? 'Improving Efficiency'
@@ -3107,15 +3169,15 @@ export function analyze(data, profile = 'default', options = {}) {
     ['r&d', 'expense']
   );
   if (rdRow && revenueRow) {
-    const pairs = alignByDate(rdRow, revenueRow, 6);
-    if (pairs.length >= 2) {
+    const { series } = ratioPctSeries(rdRow, revenueRow, 6);
+    if (series.length >= 2) {
       const latestPct =
-        (Math.abs(pairs[pairs.length - 1].a) / pairs[pairs.length - 1].b) * 100;
+        series[series.length - 1];
       costItems.push(
         makeItem(
           'R&D as % of Revenue',
           `Latest: ${latestPct.toFixed(1)}%`,
-          pairs.map((p) => Math.abs(p.a)),
+          series,
           latestPct > 5 ? 'bull' : latestPct > 2 ? 'neutral' : 'neutral',
           latestPct > 15
             ? 'Heavy Investment'
@@ -3136,15 +3198,15 @@ export function analyze(data, profile = 'default', options = {}) {
     'D&A'
   );
   if (daRow && revenueRow) {
-    const pairs = alignByDate(daRow, revenueRow, 6);
-    if (pairs.length >= 2) {
+    const { series } = ratioPctSeries(daRow, revenueRow, 6);
+    if (series.length >= 2) {
       const latestPct =
-        (Math.abs(pairs[pairs.length - 1].a) / pairs[pairs.length - 1].b) * 100;
+        series[series.length - 1];
       costItems.push(
         makeItem(
           'D&A as % of Revenue',
           `Latest: ${latestPct.toFixed(1)}%`,
-          pairs.map((p) => Math.abs(p.a)),
+          series,
           latestPct < 5 ? 'bull' : latestPct < 10 ? 'neutral' : 'bear',
           latestPct < 5
             ? 'Asset-light'
@@ -3167,7 +3229,7 @@ export function analyze(data, profile = 'default', options = {}) {
     const vals = getRecentValues(taxRateRow, 6);
     const latest = vals[vals.length - 1];
     const sd = stddev(vals);
-    if (latest !== null) {
+    if (latest != null) {
       costItems.push(
         makeItem(
           'Effective Tax Rate',
@@ -3196,16 +3258,16 @@ export function analyze(data, profile = 'default', options = {}) {
   // Interest Expense analysis
   const intExpRow = findRowAny(is, 'Gastos por intereses', 'Interest Expense');
   if (intExpRow && revenueRow) {
-    const pairs = alignByDate(intExpRow, revenueRow, 6);
-    if (pairs.length >= 1) {
+    const { series } = ratioPctSeries(intExpRow, revenueRow, 6);
+    if (series.length >= 1) {
       const latestPct =
-        (Math.abs(pairs[pairs.length - 1].a) / pairs[pairs.length - 1].b) * 100;
+        series[series.length - 1];
       if (latestPct > 0.5) {
         costItems.push(
           makeItem(
             'Interest Expense as % of Revenue',
             `Latest: ${latestPct.toFixed(1)}%`,
-            pairs.map((p) => Math.abs(p.a)),
+            series,
             latestPct < 2 ? 'bull' : latestPct < 5 ? 'neutral' : 'bear',
             latestPct < 2
               ? 'Minimal'
@@ -3226,15 +3288,15 @@ export function analyze(data, profile = 'default', options = {}) {
     'Stock Based Comp'
   );
   if (sbcRow && revenueRow) {
-    const pairs = alignByDate(sbcRow, revenueRow, 6);
-    if (pairs.length >= 1) {
+    const { series } = ratioPctSeries(sbcRow, revenueRow, 6);
+    if (series.length >= 1) {
       const latestPct =
-        (Math.abs(pairs[pairs.length - 1].a) / pairs[pairs.length - 1].b) * 100;
+        series[series.length - 1];
       costItems.push(
         makeItem(
           'Stock-Based Comp as % of Revenue',
           `Latest: ${latestPct.toFixed(1)}%`,
-          pairs.map((p) => Math.abs(p.a)),
+          series,
           latestPct < 3 ? 'bull' : latestPct < 8 ? 'neutral' : 'bear',
           latestPct < 3
             ? 'Low Dilution'
@@ -3330,30 +3392,37 @@ export function analyze(data, profile = 'default', options = {}) {
     );
     const leverageInflatedRoe =
       equityMultiplierForRoe !== null && equityMultiplierForRoe > 4;
+    const equityRiskFlag = hasNonPositiveEquity(bsEquityForMultiplier, 2);
     moatItems.push(
       makeItem(
         'ROE (Return on Equity)',
         `Latest: ${latest?.toFixed(1)}%`,
         vals,
-        leverageInflatedRoe
+        equityRiskFlag
           ? 'neutral'
-          : latest > 20
+          : leverageInflatedRoe
+            ? 'neutral'
+            : latest > 20
             ? 'bull'
             : latest > 12
               ? 'neutral'
               : 'bear',
-        leverageInflatedRoe
-          ? 'High ROE but leverage-inflated'
-          : latest > 25
+        equityRiskFlag
+          ? 'Equity base is low/negative'
+          : leverageInflatedRoe
+            ? 'High ROE but leverage-inflated'
+            : latest > 25
             ? 'Outstanding'
             : latest > 20
               ? 'Excellent'
               : latest > 12
                 ? 'Good'
                 : 'Below Average',
-        leverageInflatedRoe
-          ? 'ROE appears high, but equity multiplier suggests leverage-driven inflation. Validate with ROA/ROIC.'
-          : 'Beware: high leverage can inflate ROE artificially'
+        equityRiskFlag
+          ? 'ROE may be distorted because average equity is low or negative in recent periods.'
+          : leverageInflatedRoe
+            ? 'ROE appears high, but equity multiplier suggests leverage-driven inflation. Validate with ROA/ROIC.'
+            : 'Beware: high leverage can inflate ROE artificially'
       )
     );
   }
@@ -3417,7 +3486,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (fcfNetRow) {
     const vals = getRecentValues(fcfNetRow, 8);
     const latest = vals[vals.length - 1];
-    if (latest !== null && latest < 0) {
+    if (latest != null && latest < 0) {
       moatItems.push(
         makeItem(
           'FCF / Net Income (Earnings Quality)',
@@ -3520,7 +3589,7 @@ export function analyze(data, profile = 'default', options = {}) {
         makeItem(
           'Cash & Equivalents / Total Assets',
           `Latest: ${cashPct.toFixed(1)}% ($${pairs[pairs.length - 1].a.toFixed(0)}M)`,
-          pairs.map((p) => p.a),
+          pairs.map((p) => (p.a / p.b) * 100),
           cashPct > 15 ? 'bull' : cashPct > 5 ? 'neutral' : 'bear',
           cashPct > 20
             ? 'Cash Rich'
@@ -3543,7 +3612,7 @@ export function analyze(data, profile = 'default', options = {}) {
         makeItem(
           'Accounts Receivable (Days)',
           `~${arDays.toFixed(0)} days — Trend: ${trend}`,
-          pairs.map((p) => p.a),
+          pairs.map((p) => (p.b ? (p.a / p.b) * 365 : null)),
           trend === 'up'
             ? arDays < 45
               ? 'neutral'
@@ -3971,7 +4040,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (interestCovRow) {
     const vals = getRecentValues(interestCovRow, 6);
     const latest = vals[vals.length - 1];
-    if (latest !== null) {
+    if (latest != null) {
       const coverageLabel =
         interestCovRow === ebitInterestCovRow
           ? 'Interest Coverage (EBIT / Interest)'
@@ -4348,7 +4417,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (assetTurnRow) {
     const vals = getRecentValues(assetTurnRow, 6);
     const latest = vals[vals.length - 1];
-    if (latest !== null) {
+    if (latest != null) {
       effItems.push(
         makeItem(
           'Asset Turnover',
@@ -4375,7 +4444,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (recTurnRow) {
     const vals = getRecentValues(recTurnRow, 6);
     const latest = vals[vals.length - 1];
-    if (latest !== null) {
+    if (latest != null) {
       effItems.push(
         makeItem(
           'Receivables Turnover',
@@ -4403,7 +4472,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (invTurnRow) {
     const vals = getRecentValues(invTurnRow, 6);
     const latest = vals[vals.length - 1];
-    if (latest !== null) {
+    if (latest != null) {
       effItems.push(
         makeItem(
           'Inventory Turnover',
@@ -4432,7 +4501,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (cccRow) {
     const vals = getRecentValues(cccRow, 6);
     const latest = vals[vals.length - 1];
-    if (latest !== null) {
+    if (latest != null) {
       effItems.push(
         makeItem(
           'Cash Conversion Cycle',
@@ -4461,7 +4530,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (dsoRow) {
     const vals = getRecentValues(dsoRow, 6);
     const latest = vals[vals.length - 1];
-    if (latest !== null) {
+    if (latest != null) {
       effItems.push(
         makeItem(
           'Days Sales Outstanding (DSO)',
@@ -4489,7 +4558,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (dpoRow) {
     const vals = getRecentValues(dpoRow, 6);
     const latest = vals[vals.length - 1];
-    if (latest !== null) {
+    if (latest != null) {
       effItems.push(
         makeItem(
           'Days Payable Outstanding (DPO)',
@@ -4511,7 +4580,7 @@ export function analyze(data, profile = 'default', options = {}) {
     const vals = getRecentValues(fixedAssetsTurnoverRow, 6);
     const latest = vals[vals.length - 1];
     const trend = getTrend(vals);
-    if (latest !== null) {
+    if (latest != null) {
       effItems.push(
         makeItem(
           'Fixed Assets Turnover',
@@ -4532,7 +4601,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (wcTurnoverRow) {
     const vals = getRecentValues(wcTurnoverRow, 6);
     const latest = vals[vals.length - 1];
-    if (latest !== null) {
+    if (latest != null) {
       const cccLatest = getLatest(cccRow);
       const isNegativeWcModel = latest < 0 && cccLatest !== null && cccLatest < 0;
       effItems.push(
@@ -4567,7 +4636,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (cfoToCurrentLiabRow) {
     const vals = getRecentValues(cfoToCurrentLiabRow, 6);
     const latest = vals[vals.length - 1];
-    if (latest !== null) {
+    if (latest != null) {
       effItems.push(
         makeItem(
           'Operating Cash Flow / Current Liabilities',
@@ -4589,7 +4658,7 @@ export function analyze(data, profile = 'default', options = {}) {
     const vals = getRecentValues(salesEmpRow, 6);
     const latest = vals[vals.length - 1];
     const trend = getTrend(vals);
-    if (latest !== null) {
+    if (latest != null) {
       effItems.push(
         makeItem(
           'Revenue Per Employee',
@@ -4610,7 +4679,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (fcfCfoRow) {
     const vals = getRecentValues(fcfCfoRow, 6);
     const latest = vals[vals.length - 1];
-    if (latest !== null) {
+    if (latest != null) {
       effItems.push(
         makeItem(
           'FCF / CFO (Capital Efficiency)',
@@ -5040,7 +5109,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (divYieldRow) {
     const vals = getRecentValues(divYieldRow, 6);
     const latest = vals[vals.length - 1];
-    if (latest !== null && latest > 0) {
+    if (latest != null && latest > 0) {
       valItems.push(
         makeItem(
           'Dividend Yield',
@@ -5063,7 +5132,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (pegRow) {
     const vals = getRecentValues(pegRow, 4);
     const latest = vals[vals.length - 1];
-    if (latest !== null) {
+    if (latest != null) {
       valItems.push(
         makeItem(
           'PEG Ratio',
@@ -5122,7 +5191,7 @@ export function analyze(data, profile = 'default', options = {}) {
     const vals = getRecentValues(dpsRow, 8);
     const latest = vals[vals.length - 1];
     const first = vals[0];
-    if (latest !== null && latest > 0) {
+    if (latest != null && latest > 0) {
       const gr = cagr(first, latest, vals.length - 1);
       const neverCut = vals.every((v, i) => i === 0 || v >= vals[i - 1]);
       shItems.push(
@@ -5147,7 +5216,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (payoutRow) {
     const vals = getRecentValues(payoutRow, 6);
     const latest = vals[vals.length - 1];
-    if (latest !== null && latest > 0) {
+    if (latest != null && latest > 0) {
       shItems.push(
         makeItem(
           'Payout Ratio',
