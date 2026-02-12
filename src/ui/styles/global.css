@@ -729,14 +729,47 @@ body {
   font-size: 0.95rem;
   margin-bottom: 0.35rem;
 }
-.printable-panel ul {
-  padding-left: 1.1rem;
+.printable-panel .print-metrics {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
 }
-.printable-panel li {
-  margin: 0.35rem 0;
+.printable-panel .print-metric {
+  margin: 0.55rem 0;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface2);
+}
+.printable-panel .print-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.printable-panel .print-headline {
+  margin-top: 0.2rem;
   color: var(--text-dim);
   font-size: 0.84rem;
-  line-height: 1.5;
+}
+.printable-panel .print-bullets {
+  margin: 0.45rem 0 0;
+  padding-left: 1rem;
+}
+.printable-panel .print-bullets li {
+  margin: 0.22rem 0;
+  color: var(--text-dim);
+  font-size: 0.83rem;
+  line-height: 1.45;
+}
+.printable-panel .print-signal {
+  margin-top: 0.45rem;
+  font-size: 0.83rem;
+  color: var(--text-dim);
+}
+.printable-panel .print-note {
+  margin-top: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--text-dim);
 }
 
 @media print {
