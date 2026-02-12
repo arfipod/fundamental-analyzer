@@ -331,6 +331,7 @@ const DYNAMIC_I18N = {
     'Operating Margin (EBIT)': 'Margen operativo (EBIT)',
     'EBITDA Margin': 'Margen EBITDA',
     'FCF Margin': 'Margen de FCF',
+    'Margin Expansion vs Gross': 'Expansión de márgenes vs bruto',
     'Operating Leverage': 'Apalancamiento operativo',
     'COGS as % of Revenue': 'COGS como % de ingresos',
     'Operating Expenses as % of Gross Profit':
@@ -1117,6 +1118,80 @@ function getRecentValues(row, n = 5, options = {}) {
   return vals;
 }
 
+function extractPeriodYear(label) {
+  const text = String(label || '').trim();
+  if (!text) return null;
+
+  const y4 = text.match(/(19|20)\d{2}/);
+  if (y4) return Number(y4[0]);
+
+  const y2 = text.match(/\b(\d{2})\b/);
+  if (!y2) return null;
+  const yr = Number(y2[1]);
+  if (Number.isNaN(yr)) return null;
+  return yr >= 80 ? 1900 + yr : 2000 + yr;
+}
+
+function getLatestCagrWindow(row, targetYears = 5, lookbackPoints = 12) {
+  const series = toSeries(row).slice(-lookbackPoints);
+  if (series.length < 2) return null;
+
+  const latest = series[series.length - 1];
+  const latestYear = extractPeriodYear(latest.date);
+  let startIdx = null;
+  let effectiveYears = null;
+
+  if (latestYear !== null) {
+    let bestPartial = null;
+    for (let i = series.length - 2; i >= 0; i--) {
+      const y = extractPeriodYear(series[i].date);
+      if (y === null) continue;
+      const diff = latestYear - y;
+      if (diff === targetYears) {
+        startIdx = i;
+        effectiveYears = diff;
+        break;
+      }
+      if (diff > 0 && diff < targetYears) {
+        if (bestPartial === null || diff > bestPartial.diff) {
+          bestPartial = { i, diff };
+        }
+      }
+    }
+    if (startIdx === null && bestPartial !== null) {
+      startIdx = bestPartial.i;
+      effectiveYears = bestPartial.diff;
+    }
+  }
+
+  if (startIdx === null) {
+    startIdx = Math.max(0, series.length - (targetYears + 1));
+    effectiveYears = series.length - 1 - startIdx;
+  }
+
+  if (!effectiveYears || effectiveYears <= 0) return null;
+  const start = series[startIdx];
+  const gr = cagr(start.value, latest.value, effectiveYears);
+  return {
+    growth: gr,
+    years: effectiveYears,
+    startValue: start.value,
+    endValue: latest.value
+  };
+}
+
+function computeEquityMultiplierFromBalance(assetsRow, equityRow, n = 2) {
+  const pairs = alignByDate(assetsRow, equityRow, 10)
+    .filter((p) => p.a !== null && p.b !== null && p.b !== 0)
+    .slice(-Math.max(1, n));
+
+  if (!pairs.length) return null;
+  const avgAssets = avg(pairs.map((p) => p.a));
+  const avgEquity = avg(pairs.map((p) => p.b));
+  if (avgAssets === null || avgEquity === null || avgEquity === 0) return null;
+  return avgAssets / avgEquity;
+}
+
 function getLatest(row) {
   if (!row) return null;
   const vals = toSeries(row).map((p) => p.value);
@@ -1711,30 +1786,280 @@ const METRIC_INTERPRETATION_LIBRARY = [
 
 
 const METRIC_INTERPRETATION_EXACT = {
-  'operating leverage': {
+  'margin expansion vs gross': {
     en: {
       definition:
-        'Measures how operating margin responds to revenue changes due to fixed vs variable costs.',
+        'Compares gross-margin change versus operating-margin change to see if overhead amplifies or offsets gross improvements.',
       lookFor:
-        'Best setup: revenue up and EBIT margin expands; if revenue is flat, margin resilience is key.',
+        'Healthy pattern: operating margin expands at least as much as gross margin over time.',
       thresholds:
-        'No universal threshold; evaluate direction of margin response through cycles.',
+        'No fixed threshold; assess sign and persistence of gross Δ vs operating Δ across cycles.',
       pitfalls:
-        'Temporary cuts (marketing/R&D) or favorable mix can mimic structural operating leverage.',
+        'Short-term cost cuts or accounting reclassifications can temporarily inflate operating margin expansion.',
       nextQuestions:
-        'Is leverage structural from scale, or temporary from cost cuts?'
+        'Is the operating-margin move structural (efficiency/scale) or temporary (cuts/timing)?'
     },
     es: {
       definition:
-        'Mide la sensibilidad del margen operativo a cambios en ingresos por la estructura de costes fijos/variables.',
+        'Compara el cambio del margen bruto frente al cambio del margen operativo para ver si el overhead amplifica o absorbe la mejora bruta.',
       lookFor:
-        'Señal ideal: ingresos al alza y expansión del margen EBIT; con ingresos planos, que el margen aguante.',
+        'Patrón sano: el margen operativo se expande al menos tanto como el margen bruto.',
       thresholds:
-        'Sin umbral universal; importa la dirección de la respuesta del margen en el ciclo.',
+        'Sin umbral fijo; importa el signo y la persistencia de Δ bruto vs Δ operativo en el ciclo.',
       pitfalls:
-        'Recortes temporales (marketing/I+D) o mix favorable pueden simular apalancamiento estructural.',
+        'Recortes temporales o reclasificaciones contables pueden inflar artificialmente la expansión operativa.',
       nextQuestions:
-        '¿La palanca viene de escala estructural o de recortes coyunturales?'
+        '¿El cambio de margen operativo es estructural (eficiencia/escala) o temporal (recortes/timing)?'
+    }
+  },
+  'operating leverage': {
+    en: {
+      definition:
+        'Proxy check of operating leverage using gross-margin delta vs operating-margin delta (margin expansion/compression lens).',
+      lookFor:
+        'Healthy pattern: operating margin expands at least as much as gross margin over time.',
+      thresholds:
+        'No fixed threshold; assess sign and persistence of gross Δ vs operating Δ across cycles.',
+      pitfalls:
+        'This is a margin-based proxy, not pure Δ%EBIT/Δ%Sales operating leverage.',
+      nextQuestions:
+        'Do margin changes reflect structural efficiency or temporary cost actions?'
+    },
+    es: {
+      definition:
+        'Chequeo proxy de apalancamiento operativo usando Δ margen bruto vs Δ margen operativo (lente de expansión/compresión de márgenes).',
+      lookFor:
+        'Patrón sano: el margen operativo se expande al menos tanto como el margen bruto.',
+      thresholds:
+        'Sin umbral fijo; importa el signo y la persistencia de Δ bruto vs Δ operativo.',
+      pitfalls:
+        'Es una aproximación por márgenes, no el apalancamiento puro Δ%EBIT/Δ%Ventas.',
+      nextQuestions:
+        '¿Los cambios de margen vienen de eficiencia estructural o de recortes temporales?'
+    }
+  },
+  'revenue growth (cagr)': {
+    en: {
+      definition: 'Annualized revenue growth over the effective window (smoothed path, not volatility).',
+      lookFor: 'Read together with margin durability and source of growth quality.',
+      thresholds: 'Contextual by sector/maturity; consistency usually matters more than one peak year.',
+      pitfalls: 'M&A and base effects can distort comparability across windows.',
+      nextQuestions: 'How much of growth is organic versus acquired?'
+    },
+    es: {
+      definition: 'Crecimiento anualizado de ingresos en la ventana efectiva (trayectoria suavizada, no volatilidad).',
+      lookFor: 'Leer junto con durabilidad de márgenes y calidad de la fuente de crecimiento.',
+      thresholds: 'Depende de sector/madurez; la consistencia suele importar más que un pico aislado.',
+      pitfalls: 'M&A y efectos base pueden distorsionar comparabilidad entre ventanas.',
+      nextQuestions: '¿Qué parte del crecimiento es orgánica versus adquirida?'
+    }
+  },
+  'revenue yoy growth': {
+    en: {
+      definition: 'Single-period year-over-year revenue growth, useful for momentum and cyclicality.',
+      lookFor: 'Compare latest YoY with multi-year average and dispersion (σ).',
+      thresholds: 'No universal threshold; stability and trend shape matter.',
+      pitfalls: 'One-year shocks can overstate momentum.',
+      nextQuestions: 'Is current YoY supported by demand and repeatable drivers?'
+    },
+    es: {
+      definition: 'Crecimiento interanual de ingresos de un periodo, útil para momentum y ciclicidad.',
+      lookFor: 'Comparar YoY actual con media multianual y dispersión (σ).',
+      thresholds: 'Sin umbral universal; importan estabilidad y forma de tendencia.',
+      pitfalls: 'Shocks de un año pueden exagerar el momentum.',
+      nextQuestions: '¿El YoY actual está respaldado por demanda y drivers repetibles?'
+    }
+  },
+  'eps growth (diluted)': {
+    en: {
+      definition: 'Tracks per-share earnings compounding after share-count effects.',
+      lookFor: 'Contrast EPS growth versus net income growth and dilution/buyback trends.',
+      thresholds: 'Sustained real growth is preferable to one-off tax/accounting jumps.',
+      pitfalls: 'Buybacks, tax changes, and SBC can move EPS without equivalent operating improvement.',
+      nextQuestions: 'How much EPS growth comes from operations vs capital-allocation effects?'
+    },
+    es: {
+      definition: 'Mide el crecimiento del beneficio por acción tras efectos de recuento de acciones.',
+      lookFor: 'Contrastar crecimiento de BPA con beneficio neto y tendencia de dilución/recompras.',
+      thresholds: 'Mejor crecimiento sostenido real que saltos puntuales fiscales/contables.',
+      pitfalls: 'Recompras, impuestos y SBC pueden mover BPA sin mejora operativa equivalente.',
+      nextQuestions: '¿Qué parte del BPA viene de operación vs asignación de capital?'
+    }
+  },
+  'stock-based comp as % of revenue': {
+    en: {
+      definition: 'Measures equity-based compensation intensity versus revenue and dilution pressure.',
+      lookFor: 'Track alongside diluted shares and net buyback effectiveness.',
+      thresholds: 'Lower/stable is usually healthier for per-share value creation.',
+      pitfalls: 'Treating SBC as “non-cash” can overstate underlying profitability quality.',
+      nextQuestions: 'Are buybacks offsetting SBC dilution on a net basis?'
+    },
+    es: {
+      definition: 'Mide la intensidad de compensación en acciones sobre ingresos y la presión de dilución.',
+      lookFor: 'Seguir junto con acciones diluidas y efectividad neta de recompras.',
+      thresholds: 'Más bajo/estable suele ser más sano para crear valor por acción.',
+      pitfalls: 'Tratar SBC como “no caja” puede sobreestimar la calidad del beneficio subyacente.',
+      nextQuestions: '¿Las recompras compensan la dilución por SBC en términos netos?'
+    }
+  },
+  'revenue vs earnings harmony': {
+    en: {
+      definition: 'Checks whether sales growth and earnings growth move coherently.',
+      lookFor: 'Persistent divergence may indicate margin pressure, mix shifts, or one-offs.',
+      thresholds: 'No hard threshold; repeated spread and direction conflicts are key.',
+      pitfalls: 'A single year mismatch can be normal in cyclical or transition periods.',
+      nextQuestions: 'What explains the revenue-earnings gap: margins, mix, tax, or accounting items?'
+    },
+    es: {
+      definition: 'Comprueba si el crecimiento de ventas y de beneficios se mueve de forma coherente.',
+      lookFor: 'Divergencias persistentes pueden señalar presión de márgenes, cambios de mix o one-offs.',
+      thresholds: 'Sin umbral fijo; importan las brechas repetidas y conflictos de dirección.',
+      pitfalls: 'Un año con desajuste puede ser normal en ciclos/transiciones.',
+      nextQuestions: '¿Qué explica la brecha ventas-beneficios: márgenes, mix, fiscalidad o contabilidad?'
+    }
+  },
+  'cfo vs net income (accrual risk)': {
+    en: {
+      definition: 'Assesses whether accounting earnings are backed by operating cash generation.',
+      lookFor: 'Ratios near/above 1x over time usually indicate stronger earnings quality.',
+      thresholds: 'Sustained sub-1x conversion deserves scrutiny.',
+      pitfalls: 'Working-capital timing can temporarily distort one period.',
+      nextQuestions: 'Is weak conversion structural or timing-driven?'
+    },
+    es: {
+      definition: 'Evalúa si el beneficio contable está respaldado por generación de caja operativa.',
+      lookFor: 'Ratios cercanos/superiores a 1x en el tiempo suelen implicar mejor calidad de beneficios.',
+      thresholds: 'Conversión sostenida por debajo de 1x merece revisión.',
+      pitfalls: 'El timing de capital circulante puede distorsionar un periodo aislado.',
+      nextQuestions: '¿La conversión débil es estructural o de timing?'
+    }
+  },
+  'fcf consistency check': {
+    en: {
+      definition: 'Checks whether free cash flow trend confirms revenue and earnings trends.',
+      lookFor: 'Prefer cash trend that follows or validates accounting performance.',
+      thresholds: 'Repeated “profits up / FCF flat-down” patterns are warning signals.',
+      pitfalls: 'Capex cycles can create temporary divergence.',
+      nextQuestions: 'Is divergence due to reinvestment cycle or weaker cash conversion quality?'
+    },
+    es: {
+      definition: 'Comprueba si la tendencia del FCF confirma la tendencia de ingresos y beneficios.',
+      lookFor: 'Preferible que la caja acompañe/valide el desempeño contable.',
+      thresholds: 'Patrones repetidos de “beneficios al alza / FCF plano-bajista” son alerta.',
+      pitfalls: 'Ciclos de capex pueden crear divergencias temporales.',
+      nextQuestions: '¿La divergencia es ciclo de reinversión o menor calidad de conversión a caja?'
+    }
+  },
+  'cash / assets': {
+    en: {
+      definition: 'Cash and near-cash buffer as a share of assets; indicates liquidity resilience and optionality.',
+      lookFor: 'Evaluate buffer size, trend, and whether liquidity supports capex, M&A, debt service, and buybacks.',
+      thresholds: 'Contextual by model and cyclicality; very low buffers increase shock sensitivity.',
+      pitfalls: 'Not all cash is equally available (restricted, trapped, or operational minimum cash).',
+      nextQuestions: 'How much of reported cash is truly deployable under stress?'
+    },
+    es: {
+      definition: 'Colchón de caja y cuasi-caja sobre activos; indica resiliencia de liquidez y opcionalidad.',
+      lookFor: 'Evaluar tamaño, tendencia y si soporta capex, M&A, servicio de deuda y recompras.',
+      thresholds: 'Depende de modelo y ciclicidad; buffers muy bajos elevan sensibilidad a shocks.',
+      pitfalls: 'No toda la caja es igual de disponible (restringida, atrapada o mínima operativa).',
+      nextQuestions: '¿Qué parte de la caja reportada es realmente desplegable en estrés?'
+    }
+  },
+  'forward p/e (ntm)': {
+    en: {
+      definition: 'Values next-twelve-month expected earnings; embeds growth, margin, and risk expectations.',
+      lookFor: 'Interpret with earnings quality and estimate reliability, not as a standalone buy/sell signal.',
+      thresholds: 'Relative context matters: own history, peers, and rates regime.',
+      pitfalls: 'Forward EPS can be revised quickly, making optically cheap/expensive levels unstable.',
+      nextQuestions: 'What EPS revision path is implied at the current multiple?'
+    },
+    es: {
+      definition: 'Valora beneficios esperados a 12 meses; incorpora expectativas de crecimiento, márgenes y riesgo.',
+      lookFor: 'Interpretar con calidad de beneficios y fiabilidad de estimaciones, no de forma aislada.',
+      thresholds: 'Importa el contexto relativo: historia propia, peers y régimen de tipos.',
+      pitfalls: 'El EPS forward puede revisarse rápido; lo “barato/caro” puede cambiar pronto.',
+      nextQuestions: '¿Qué trayectoria de revisiones de EPS exige el múltiplo actual?'
+    }
+  },
+  'price / sales': {
+    en: {
+      definition: 'Values each unit of revenue; useful when margins are cyclical or earnings are noisy.',
+      lookFor: 'Read with gross/operating margin structure and conversion to free cash flow.',
+      thresholds: 'Higher P/S is more justified with durable margins and strong cash conversion.',
+      pitfalls: 'Revenue growth without margin quality can make P/S look cheaper than economics justify.',
+      nextQuestions: "What normalized margin and FCF conversion are implied by today's P/S?"
+    },
+    es: {
+      definition: 'Valora cada unidad de ingresos; útil cuando márgenes son cíclicos o beneficios ruidosos.',
+      lookFor: 'Leer junto con estructura de márgenes y conversión a FCF.',
+      thresholds: 'Un P/S alto se justifica más con márgenes duraderos y fuerte conversión a caja.',
+      pitfalls: 'Crecimiento de ingresos sin calidad de margen puede hacer parecer el P/S más barato de lo real.',
+      nextQuestions: '¿Qué margen normalizado y conversión a FCF descuenta el P/S actual?'
+    }
+  },
+  'price / book value': {
+    en: {
+      definition: 'Values equity relative to accounting book value.',
+      lookFor: 'Most useful with asset-heavy/financial models and when book value quality is high.',
+      thresholds: 'Interpret with return on equity and capital intensity.',
+      pitfalls: 'For intangibles-heavy firms, book value may understate economic moat assets.',
+      nextQuestions: 'Is high P/B explained by sustainably high ROE or by accounting distortions?'
+    },
+    es: {
+      definition: 'Valora el patrimonio frente al valor contable.',
+      lookFor: 'Más útil en modelos intensivos en activos/financieros y con buena calidad contable del book.',
+      thresholds: 'Interpretar junto con ROE e intensidad de capital.',
+      pitfalls: 'En compañías intensivas en intangibles, el valor contable puede infrarrepresentar activos económicos.',
+      nextQuestions: '¿Un P/B alto se explica por ROE sostenible o por distorsiones contables?'
+    }
+  },
+  'ev / ebitda (ntm)': {
+    en: {
+      definition: 'Enterprise-value multiple over expected EBITDA, capital-structure neutral at headline level.',
+      lookFor: 'Use with reinvestment needs (capex) and cash conversion to avoid EBITDA-only bias.',
+      thresholds: 'Contextual vs peers/history and rates regime.',
+      pitfalls: 'Ignores capex intensity and working-capital demands; two firms with same EV/EBITDA can differ greatly in FCF.',
+      nextQuestions: 'How much EBITDA converts to owner cash after reinvestment?'
+    },
+    es: {
+      definition: 'Múltiplo de valor de empresa sobre EBITDA esperado, neutral a estructura de capital en titular.',
+      lookFor: 'Usarlo con necesidades de reinversión (capex) y conversión a caja para evitar sesgo EBITDA-only.',
+      thresholds: 'Contextual vs peers/historia y régimen de tipos.',
+      pitfalls: 'Ignora intensidad de capex y capital circulante; mismo EV/EBITDA puede implicar FCF muy distinto.',
+      nextQuestions: '¿Cuánto EBITDA se convierte en caja para el accionista tras reinversión?'
+    }
+  },
+  'ev / ebit (ntm)': {
+    en: {
+      definition: 'Enterprise-value multiple over expected operating profit after depreciation.',
+      lookFor: 'More informative than EV/EBITDA when depreciation tracks real asset consumption.',
+      thresholds: 'Interpret relatively, not as absolute good/bad levels.',
+      pitfalls: 'Accounting depreciation may still differ from true maintenance capex.',
+      nextQuestions: 'Is EBIT a good proxy for sustainable operating earning power here?'
+    },
+    es: {
+      definition: 'Múltiplo de valor de empresa sobre beneficio operativo esperado tras depreciación.',
+      lookFor: 'Más informativo que EV/EBITDA cuando la depreciación refleja consumo real de activos.',
+      thresholds: 'Interpretación relativa, no umbrales absolutos rígidos.',
+      pitfalls: 'La depreciación contable puede diferir del capex de mantenimiento real.',
+      nextQuestions: '¿El EBIT aproxima bien el poder de beneficio operativo sostenible?'
+    }
+  },
+  'total shareholder yield': {
+    en: {
+      definition: 'Dividends plus net buybacks relative to market cap; a direct shareholder cash-return lens.',
+      lookFor: 'Prefer sustainable yields funded by recurring FCF and stable balance sheet.',
+      thresholds: 'Very high yields can be attractive but require unit/scope sanity checks.',
+      pitfalls: 'Scaling/unit mismatches can produce impossible yields; avoid scoring until validated.',
+      nextQuestions: 'Is net shareholder yield still strong after SBC dilution and debt effects?'
+    },
+    es: {
+      definition: 'Dividendos más recompras netas sobre market cap; visión directa del retorno de caja al accionista.',
+      lookFor: 'Preferir yields sostenibles financiados por FCF recurrente y balance estable.',
+      thresholds: 'Yields muy altos pueden ser atractivos pero exigen chequeo de unidades/escala.',
+      pitfalls: 'Errores de escala/unidades pueden generar yields imposibles; no puntuar hasta validar.',
+      nextQuestions: '¿El yield al accionista sigue fuerte tras dilución por SBC y efectos de deuda?'
     }
   },
   'sg&a as % of revenue': {
@@ -2261,14 +2586,17 @@ export function analyze(data, profile = 'default', options = {}) {
 
   if (revenueRow) {
     const vals = getRecentValues(revenueRow, 10);
-    const latest = vals[vals.length - 1];
-    const five = vals.length >= 6 ? vals[vals.length - 6] : vals[0];
-    const years = vals.length >= 6 ? 5 : vals.length - 1;
-    const gr = cagr(five, latest, years);
+    const cagrWindow = getLatestCagrWindow(revenueRow, 5, 12);
+    const gr = cagrWindow?.growth ?? null;
+    const years = cagrWindow?.years ?? null;
+    const startValue = cagrWindow?.startValue ?? null;
+    const endValue = cagrWindow?.endValue ?? null;
     growthItems.push(
       makeItem(
         'Revenue Growth (CAGR)',
-        gr !== null ? `${years}Y CAGR: ${gr.toFixed(1)}%` : 'Insufficient data',
+        gr !== null && years !== null
+          ? `${years}Y CAGR: ${gr.toFixed(1)}%`
+          : 'Insufficient data',
         vals,
         gr > 15 ? 'bull' : gr > 8 ? 'neutral' : 'bear',
         gr > 15
@@ -2278,7 +2606,9 @@ export function analyze(data, profile = 'default', options = {}) {
             : gr > 0
               ? 'Slow'
               : 'Declining',
-        `Revenue: ${five?.toFixed(0)} → ${latest?.toFixed(0)}`
+        startValue !== null && endValue !== null
+          ? `Revenue: ${startValue.toFixed(0)} → ${endValue.toFixed(0)}`
+          : ''
       )
     );
 
@@ -2945,6 +3275,15 @@ export function analyze(data, profile = 'default', options = {}) {
     'ROE',
     'Return on Equity'
   );
+  const bsAssetsForMultiplier = findRowAny(bs, 'Total Assets', 'Activo total', 'Activos totales');
+  const bsEquityForMultiplier = findRowAny(
+    bs,
+    'Total Equity',
+    'Total Common Equity',
+    'Fondos propios totales',
+    'Patrimonio neto común total'
+  );
+
   if (roeRow) {
     const vals = getRecentValues(roeRow, 10);
     const latest = vals[vals.length - 1];
@@ -2955,10 +3294,11 @@ export function analyze(data, profile = 'default', options = {}) {
       'Return on Assets'
     );
     const roaForRoe = getLatest(roaRowForRoe);
-    const equityMultiplierForRoe =
-      latest !== null && roaForRoe !== null && roaForRoe !== 0
-        ? latest / roaForRoe
-        : null;
+    const equityMultiplierForRoe = computeEquityMultiplierFromBalance(
+      bsAssetsForMultiplier,
+      bsEquityForMultiplier,
+      2
+    );
     const leverageInflatedRoe =
       equityMultiplierForRoe !== null && equityMultiplierForRoe > 4;
     moatItems.push(
@@ -3017,13 +3357,15 @@ export function analyze(data, profile = 'default', options = {}) {
 
   // Dupont decomposition insight: ROE driven by margins vs leverage
   if (roeRow && roaRow) {
-    const roe = getLatest(roeRow);
-    const roa = getLatest(roaRow);
-    if (roe && roa && roa !== 0) {
-      const equityMultiplier = roe / roa;
+    const equityMultiplier = computeEquityMultiplierFromBalance(
+      bsAssetsForMultiplier,
+      bsEquityForMultiplier,
+      2
+    );
+    if (equityMultiplier !== null) {
       moatItems.push(
         makeItem(
-          'Equity Multiplier (ROE/ROA)',
+          'Equity Multiplier (Assets/Equity)',
           `${equityMultiplier.toFixed(1)}x — ${equityMultiplier < 2 ? 'Low leverage' : equityMultiplier < 3 ? 'Moderate leverage' : 'High leverage'}`,
           [],
           equityMultiplier < 2
@@ -3036,7 +3378,7 @@ export function analyze(data, profile = 'default', options = {}) {
             : equityMultiplier < 3
               ? 'Some Leverage'
               : 'Leverage-driven ROE',
-          'ROE = ROA × Equity Multiplier. Lower multiplier = ROE driven by profitability, not debt'
+          'Computed from balance sheet averages (Assets/Equity). Lower multiplier = ROE driven by profitability, not debt'
         )
       );
     }
@@ -3428,9 +3770,9 @@ export function analyze(data, profile = 'default', options = {}) {
     );
   }
 
+  const ndERow2 = findRowAny(ratios, 'Net Debt / EBITDA', 'Deuda Neta / EBITDA');
   const netDebtEbitdaRow = findRowAny(ce, 'Deuda Neta / EBITDA');
-  const ndERow2 = findRowAny(ratios, 'Net Debt / EBITDA');
-  const ndeSrc = netDebtEbitdaRow || ndERow2;
+  const ndeSrc = ndERow2 || netDebtEbitdaRow;
   if (ndeSrc) {
     const vals = getRecentValues(ndeSrc, 6);
     const latest = vals[vals.length - 1];
