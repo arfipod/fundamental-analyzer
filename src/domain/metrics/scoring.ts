@@ -169,7 +169,7 @@ function alignByDate(rowA, rowB, n = 6, options = {}) {
   );
   return aSeries
     .map((p) => ({ date: p.date, a: p.value, b: bMap.get(p.date) ?? null }))
-    .filter((p) => p.b !== null)
+    .filter((p) => p.a !== null && p.b !== null)
     .slice(-n);
 }
 
@@ -178,7 +178,7 @@ function ratioPctSeries(numerRow, denomRow, n = 6, options = {}) {
   const series = [];
   const labels = [];
   pairs.forEach((p) => {
-    if (!p.b) return;
+    if (p.a == null || p.b == null || p.b === 0) return;
     series.push((Math.abs(p.a) / Math.abs(p.b)) * 100);
     labels.push(p.date);
   });
@@ -769,11 +769,13 @@ function stddev(arr) {
 
 function yoyGrowth(vals) {
   if (!vals || vals.length < 2) return [];
-  return vals.slice(1).map((v, i) => {
+  const out = vals.slice(1).map((v, i) => {
     const prev = vals[i];
     if (!prev || prev === 0) return null;
     return ((v - prev) / Math.abs(prev)) * 100;
   });
+  if (vals.labels) out.labels = vals.labels.slice(1);
+  return out;
 }
 
 function median(arr) {
@@ -6177,4 +6179,3 @@ export function analyzeData() {
     errEl.style.display = 'block';
   }
 }
-
