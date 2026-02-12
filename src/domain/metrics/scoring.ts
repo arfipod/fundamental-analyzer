@@ -2607,19 +2607,16 @@ export function analyze(data, profile = 'default', options = {}) {
     'COGS'
   );
   if (cogsRow && revenueRow) {
-    const { pairs, series } = ratioPctSeries(cogsRow, revenueRow, 6);
+    const { series } = ratioPctSeries(cogsRow, revenueRow, 6);
     if (series.length >= 2) {
-      const latestPct =
-        (Math.abs(pairs[pairs.length - 1].a) /
-          Math.abs(pairs[pairs.length - 1].b)) *
-        100;
-      const firstPct = (Math.abs(pairs[0].a) / Math.abs(pairs[0].b)) * 100;
+      const latestPct = series[series.length - 1];
+      const firstPct = series[0];
       const delta = latestPct - firstPct;
       costItems.push(
         makeItem(
           'COGS as % of Revenue',
           `Latest: ${latestPct.toFixed(1)}% (Δ ${delta > 0 ? '+' : ''}${delta.toFixed(1)}pp)`,
-          pairs.map((p) => (p.a / p.b) * 100),
+          series,
           delta < -2 ? 'bull' : delta < 2 ? 'neutral' : 'bear',
           delta < -2 ? 'Improving' : delta < 2 ? 'Stable' : 'Rising Costs'
         )
