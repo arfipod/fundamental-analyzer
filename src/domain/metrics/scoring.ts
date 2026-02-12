@@ -1,5 +1,12 @@
 // @ts-nocheck
-let currentLang = localStorage.getItem('fundamentalAnalyzerLang') || 'es';
+const STORAGE_KEY = 'fundamentalAnalyzerLang';
+const DEFAULT_LANG = 'es';
+
+function asLang(value) {
+  return value === 'en' ? 'en' : 'es';
+}
+
+let currentLang = asLang(localStorage.getItem(STORAGE_KEY) || DEFAULT_LANG);
 const langListeners = new Set();
 
 export function getCurrentLang() {
@@ -44,8 +51,8 @@ export function onLanguageChange(cb) {
 }
 
 export function setLanguage(lang) {
-  currentLang = lang === 'en' ? 'en' : 'es';
-  localStorage.setItem('fundamentalAnalyzerLang', currentLang);
+  currentLang = asLang(lang);
+  localStorage.setItem(STORAGE_KEY, currentLang);
   applyLocalization();
   const langSel = document.getElementById('langSelect');
   if (langSel) langSel.value = currentLang;
@@ -227,6 +234,12 @@ const LABEL_NORMALIZATION_FIXES = {
   extradordinarios: 'extraordinarios'
 };
 
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const LABEL_FIX_PATTERNS = Object.entries(LABEL_NORMALIZATION_FIXES).map(
+  ([wrong, ok]) => [new RegExp(escapeRegExp(wrong), 'gi'), ok]
+);
+
 function normalizeLabelText(label) {
   if (!label) return '';
   let out = String(label)
@@ -234,8 +247,7 @@ function normalizeLabelText(label) {
     .replace(/\s+/g, ' ')
     .replace(/\s*%\s*/g, ' % ')
     .trim();
-  Object.entries(LABEL_NORMALIZATION_FIXES).forEach(([wrong, ok]) => {
-    const re = new RegExp(wrong, 'gi');
+  LABEL_FIX_PATTERNS.forEach(([re, ok]) => {
     out = out.replace(re, ok);
   });
   return out.replace(/%\s+\)/g, '%)').replace(/\s+/g, ' ').trim();
@@ -552,8 +564,6 @@ const DYNAMIC_I18N = {
   }
 };
 
-const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
 const FIN_LABEL_ENTRIES = Object.entries(FINANCIAL_LABEL_EN_ES).sort(
   (a, b) => b[0].length - a[0].length
 );
@@ -571,41 +581,60 @@ const FRAG_ENTRIES = Object.entries(DYNAMIC_I18N.fragments).sort(
 );
 const FRAG_ENTRIES_REVERSED = FRAG_ENTRIES.map(([en, es]) => [es, en]);
 
-function replaceBounded(text, from, to) {
-  if (!from) return text;
-  const escaped = escapeRegExp(from);
-  const hasAlphaNum = /[A-Za-z0-9]/.test(from);
-  if (!hasAlphaNum) return text.replaceAll(from, to);
-  const re = new RegExp(`(^|[^A-Za-z0-9_])(${escaped})(?=$|[^A-Za-z0-9_])`, 'g');
-  return text.replace(re, (_, lead) => `${lead}${to}`);
+function compileReplacers(entries) {
+  return entries.map(([from, to]) => {
+    const hasAlphaNum = /[A-Za-z0-9]/.test(from);
+    if (!hasAlphaNum) {
+      return {
+        replace: (text) => text.replaceAll(from, to)
+      };
+    }
+    const escaped = escapeRegExp(from);
+    const re = new RegExp(
+      `(^|[^A-Za-z0-9_])(${escaped})(?=$|[^A-Za-z0-9_])`,
+      'g'
+    );
+    return {
+      replace: (text) => text.replace(re, (_, lead) => `${lead}${to}`)
+    };
+  });
 }
+
+const METRIC_REPLACERS_ES = compileReplacers(METRIC_ENTRIES);
+const METRIC_REPLACERS_EN = compileReplacers(METRIC_ENTRIES_REVERSED);
+const SECTION_REPLACERS_ES = compileReplacers(SECTION_ENTRIES);
+const SECTION_REPLACERS_EN = compileReplacers(SECTION_ENTRIES_REVERSED);
+const FRAG_REPLACERS_ES = compileReplacers(FRAG_ENTRIES);
+const FRAG_REPLACERS_EN = compileReplacers(FRAG_ENTRIES_REVERSED);
+const FIN_REPLACERS_ES = compileReplacers(FIN_LABEL_ENTRIES);
+const FIN_REPLACERS_EN = compileReplacers(FIN_LABEL_ENTRIES_REVERSED);
 
 function localizeDynamicText(text) {
   if (!text) return text;
   let out = normalizeLabelText(String(text));
 
-  const metricEntries =
-    currentLang === 'es' ? METRIC_ENTRIES : METRIC_ENTRIES_REVERSED;
-  metricEntries.forEach(([from, to]) => {
-    out = replaceBounded(out, from, to);
+  const metricReplacers =
+    currentLang === 'es' ? METRIC_REPLACERS_ES : METRIC_REPLACERS_EN;
+  metricReplacers.forEach((replacer) => {
+    out = replacer.replace(out);
   });
 
-  const sectionEntries =
-    currentLang === 'es' ? SECTION_ENTRIES : SECTION_ENTRIES_REVERSED;
-  sectionEntries.forEach(([from, to]) => {
-    out = replaceBounded(out, from, to);
+  const sectionReplacers =
+    currentLang === 'es' ? SECTION_REPLACERS_ES : SECTION_REPLACERS_EN;
+  sectionReplacers.forEach((replacer) => {
+    out = replacer.replace(out);
   });
 
-  const fragmentEntries =
-    currentLang === 'es' ? FRAG_ENTRIES : FRAG_ENTRIES_REVERSED;
-  fragmentEntries.forEach(([from, to]) => {
-    out = replaceBounded(out, from, to);
+  const fragmentReplacers =
+    currentLang === 'es' ? FRAG_REPLACERS_ES : FRAG_REPLACERS_EN;
+  fragmentReplacers.forEach((replacer) => {
+    out = replacer.replace(out);
   });
 
-  const financialEntries =
-    currentLang === 'es' ? FIN_LABEL_ENTRIES : FIN_LABEL_ENTRIES_REVERSED;
-  financialEntries.forEach(([from, to]) => {
-    out = replaceBounded(out, from, to);
+  const financialReplacers =
+    currentLang === 'es' ? FIN_REPLACERS_ES : FIN_REPLACERS_EN;
+  financialReplacers.forEach((replacer) => {
+    out = replacer.replace(out);
   });
 
   return out;
