@@ -4754,24 +4754,57 @@ export function analyze(data, profile = 'default', options = {}) {
     'Levered Free Cash Flow Yield',
     'FCF Yield'
   );
+  let fcfYieldLatest = null;
   if (fcfYieldRow) {
     const vals = getRecentValues(fcfYieldRow, 8);
     const latest = vals[vals.length - 1];
+    fcfYieldLatest = latest;
+    const invalidYield = !Number.isFinite(latest) || latest <= 0;
     valItems.push(
       makeItem(
         'FCF Yield (NTM)',
-        `Latest: ${latest?.toFixed(1)}%`,
-        vals,
-        latest > 5 ? 'bull' : latest > 3 ? 'neutral' : 'bear',
-        latest > 7
-          ? 'Very Attractive'
-          : latest > 5
-            ? 'Good Value'
-            : latest > 3
-              ? 'Fair'
-              : 'Low Yield'
+        invalidYield ? 'N/A' : `Latest: ${latest?.toFixed(1)}%`,
+        invalidYield ? [] : vals,
+        invalidYield ? 'info' : latest > 5 ? 'bull' : latest > 3 ? 'neutral' : 'bear',
+        invalidYield
+          ? 'Data issue ⚠️'
+          : latest > 7
+            ? 'Very Attractive'
+            : latest > 5
+              ? 'Good Value'
+              : latest > 3
+                ? 'Fair'
+                : 'Low Yield',
+        invalidYield
+          ? 'FCF yield is non-positive or non-finite. Metric excluded from scoring until data extraction is validated.'
+          : ''
       )
     );
+  }
+
+  if (
+    Number.isFinite(fcfYieldLatest) &&
+    fcfYieldLatest > 0 &&
+    mcapFcfNtmRow
+  ) {
+    const pfcfVals = getRecentValues(mcapFcfNtmRow, 8);
+    const latestPfcf = pfcfVals[pfcfVals.length - 1];
+    if (Number.isFinite(latestPfcf) && latestPfcf > 0) {
+      const impliedYield = 100 / latestPfcf;
+      const spread = Math.abs(fcfYieldLatest - impliedYield);
+      if (spread > 1) {
+        valItems.push(
+          makeItem(
+            'FCF Yield vs P/FCF Consistency Check',
+            `FCF Yield ${fcfYieldLatest.toFixed(1)}% vs implied ${(impliedYield).toFixed(1)}% from P/FCF ${latestPfcf.toFixed(1)}x (Δ ${spread.toFixed(1)}pp)`,
+            [fcfYieldLatest, impliedYield],
+            'info',
+            'Definition mismatch ⚠️',
+            'FCF yield should be the inverse of P/FCF (same period/definition). Recheck NTM/LTM basis and levered vs unlevered FCF mapping.'
+          )
+        );
+      }
+    }
   }
 
   // Dividend Yield

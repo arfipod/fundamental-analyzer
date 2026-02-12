@@ -394,6 +394,43 @@ describe('analysis regressions for alignment and period handling', () => {
     expect(pb?.signalText).toContain('Not interpretable');
   });
 
+
+  it('adds FCF yield vs P/FCF consistency warning when inverse relation breaks', () => {
+    setLanguage('en');
+    const dates = ['2022', '2023', '2024'];
+    const data = {
+      company: 'Yield Mismatch Co',
+      sections: {
+        'Income Statement': { dates, rows: [{ label: 'Revenue', values: ['100', '110', '120'], dates }] },
+        'Balance Sheet': { dates, rows: [] },
+        Ratios: { dates, rows: [] },
+        'Cash Flow': { dates, rows: [] },
+        'Valuation Multiples': {
+          dates,
+          rows: [
+            { label: 'Market Cap', values: ['1000', '1100', '1200'], dates },
+            { label: 'Enterprise Value', values: ['1300', '1400', '1500'], dates },
+            { label: 'FCF Yield', values: ['4', '5', '8'], dates },
+            { label: 'NTM Market Cap / Free Cash Flow', values: ['20', '20', '20'], dates }
+          ]
+        }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false }) as {
+      sections: ResultSection[];
+    };
+
+    const valuation = results.sections.find((s) => s.id === 'valuation');
+    const consistency = valuation?.items.find(
+      (i) => i.name === 'FCF Yield vs P/FCF Consistency Check'
+    );
+
+    expect(consistency).toBeTruthy();
+    expect(consistency?.signal).toBe('info');
+    expect(consistency?.signalText).toContain('Definition mismatch');
+  });
+
   it('marks LTM EV multiples as data issues when non-positive', () => {
     setLanguage('en');
     const dates = ['2022', '2023', '2024'];
