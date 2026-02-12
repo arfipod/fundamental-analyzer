@@ -2606,10 +2606,12 @@ export function analyze(data, profile = 'default', options = {}) {
     'Cost of Goods Sold',
     'COGS'
   );
+  let latestCogsPct = null;
   if (cogsRow && revenueRow) {
     const { series } = ratioPctSeries(cogsRow, revenueRow, 6);
     if (series.length >= 2) {
       const latestPct = series[series.length - 1];
+      latestCogsPct = latestPct;
       const firstPct = series[0];
       const delta = latestPct - firstPct;
       costItems.push(
@@ -2621,6 +2623,27 @@ export function analyze(data, profile = 'default', options = {}) {
           delta < -2 ? 'Improving' : delta < 2 ? 'Stable' : 'Rising Costs'
         )
       );
+    }
+  }
+
+  if (grossSrc && Number.isFinite(latestCogsPct)) {
+    const grossVals = getRecentValues(grossSrc, 6);
+    const grossLatest = grossVals[grossVals.length - 1];
+    if (Number.isFinite(grossLatest)) {
+      const sum = grossLatest + latestCogsPct;
+      const drift = Math.abs(sum - 100);
+      if (drift > 5) {
+        costItems.push(
+          makeItem(
+            'Gross Margin vs COGS Consistency Check',
+            `Gross ${grossLatest.toFixed(1)}% + COGS ${latestCogsPct.toFixed(1)}% = ${sum.toFixed(1)}% (Δ ${drift.toFixed(1)}pp vs 100%)`,
+            [grossLatest, latestCogsPct],
+            'info',
+            'Definition mismatch ⚠️',
+            'Gross margin and COGS% should roughly sum to 100% under consistent definitions. Recheck COGS mapping, period alignment, and denominator basis.'
+          )
+        );
+      }
     }
   }
 
@@ -3455,6 +3478,9 @@ export function analyze(data, profile = 'default', options = {}) {
     );
   }
 
+  const isNotInterpretableRatio = (value) => !Number.isFinite(value) || value <= 0;
+  const isExplodingCoverage = (value) => !Number.isFinite(value) || Math.abs(value) > 1000;
+
   const currentRatioRow = findRowAny(
     ratios,
     'Ratio de liquidez',
@@ -3471,33 +3497,41 @@ export function analyze(data, profile = 'default', options = {}) {
       ? cfoValsForLiquidity.filter((v) => v > 0).length / cfoValsForLiquidity.length
       : 0;
     const floatModel = latest <= 1 && cccLatest !== null && cccLatest < 0 && cfoPositiveShare >= 0.75;
+    const notInterpretable = isNotInterpretableRatio(latest);
     debtItems.push(
       makeItem(
         'Current Ratio',
-        `Latest: ${latest?.toFixed(2)}x`,
-        vals,
-        floatModel
-          ? 'neutral'
-          : latest > 1.5
-            ? 'bull'
-            : latest > 1.0
-              ? 'neutral'
-              : 'bear',
-        floatModel
-          ? 'Low ratio but float model supported'
-          : latest > 2.0
-            ? 'Very Healthy'
+        notInterpretable ? 'N/A' : `Latest: ${latest?.toFixed(2)}x`,
+        notInterpretable ? [] : vals,
+        notInterpretable
+          ? 'info'
+          : floatModel
+            ? 'neutral'
             : latest > 1.5
-              ? 'Healthy'
+              ? 'bull'
               : latest > 1.0
-                ? 'Adequate'
-                : 'Tight Liquidity ⚠️',
-        floatModel
-          ? 'In negative-CCC models with strong CFO, sub-1 current ratio can be structural; still monitor maturities and stress scenarios.'
-          : '',
+                ? 'neutral'
+                : 'bear',
+        notInterpretable
+          ? 'Not interpretable ⚠️'
+          : floatModel
+            ? 'Low ratio but float model supported'
+            : latest > 2.0
+              ? 'Very Healthy'
+              : latest > 1.5
+                ? 'Healthy'
+                : latest > 1.0
+                  ? 'Adequate'
+                  : 'Tight Liquidity ⚠️',
+        notInterpretable
+          ? 'Current ratio is non-positive or non-finite. Metric excluded from scoring until data extraction is validated.'
+          : floatModel
+            ? 'In negative-CCC models with strong CFO, sub-1 current ratio can be structural; still monitor maturities and stress scenarios.'
+            : '',
         {
-          scoreRule:
-            "latest > 1.5 ? 'bull' : latest > 1.0 ? 'neutral' : 'bear'; latest > 2.0 ? 'Very Healthy' : latest > 1.5 ? 'Healthy' : latest > 1.0 ? 'Adequate' : 'Tight Liquidity ⚠️'."
+          scoreRule: notInterpretable
+            ? 'Do not score (not_interpretable)'
+            : "latest > 1.5 ? 'bull' : latest > 1.0 ? 'neutral' : 'bear'; latest > 2.0 ? 'Very Healthy' : latest > 1.5 ? 'Healthy' : latest > 1.0 ? 'Adequate' : 'Tight Liquidity ⚠️'."
         }
       )
     );
@@ -3521,33 +3555,41 @@ export function analyze(data, profile = 'default', options = {}) {
       ? cfoValsForLiquidity.filter((v) => v > 0).length / cfoValsForLiquidity.length
       : 0;
     const floatModel = latest <= 0.8 && cccLatest !== null && cccLatest < 0 && cfoPositiveShare >= 0.75;
+    const notInterpretable = isNotInterpretableRatio(latest);
     debtItems.push(
       makeItem(
         'Quick Ratio (Acid Test)',
-        `Latest: ${latest?.toFixed(2)}x`,
-        vals,
-        floatModel
-          ? 'neutral'
-          : latest > 1.2
-            ? 'bull'
-            : latest > 0.8
-              ? 'neutral'
-              : 'bear',
-        floatModel
-          ? 'Low quick ratio but float model supported'
-          : latest > 1.5
-            ? 'Very Liquid'
+        notInterpretable ? 'N/A' : `Latest: ${latest?.toFixed(2)}x`,
+        notInterpretable ? [] : vals,
+        notInterpretable
+          ? 'info'
+          : floatModel
+            ? 'neutral'
             : latest > 1.2
-              ? 'Healthy'
+              ? 'bull'
               : latest > 0.8
-                ? 'OK'
-                : 'Low Liquidity ⚠️',
-        floatModel
-          ? 'With negative CCC and strong CFO, low quick ratio can be structural; monitor funding access and near-term maturities.'
-          : 'Excludes inventory — more conservative than current ratio',
+                ? 'neutral'
+                : 'bear',
+        notInterpretable
+          ? 'Not interpretable ⚠️'
+          : floatModel
+            ? 'Low quick ratio but float model supported'
+            : latest > 1.5
+              ? 'Very Liquid'
+              : latest > 1.2
+                ? 'Healthy'
+                : latest > 0.8
+                  ? 'OK'
+                  : 'Low Liquidity ⚠️',
+        notInterpretable
+          ? 'Quick ratio is non-positive or non-finite. Metric excluded from scoring until data extraction is validated.'
+          : floatModel
+            ? 'With negative CCC and strong CFO, low quick ratio can be structural; monitor funding access and near-term maturities.'
+            : 'Excludes inventory — more conservative than current ratio',
         {
-          scoreRule:
-            "latest > 1.2 ? 'bull' : latest > 0.8 ? 'neutral' : 'bear'; latest > 1.5 ? 'Very Liquid' : latest > 1.2 ? 'Healthy' : latest > 0.8 ? 'OK' : 'Low Liquidity ⚠️'; Excludes inventory."
+          scoreRule: notInterpretable
+            ? 'Do not score (not_interpretable)'
+            : "latest > 1.2 ? 'bull' : latest > 0.8 ? 'neutral' : 'bear'; latest > 1.5 ? 'Very Liquid' : latest > 1.2 ? 'Healthy' : latest > 0.8 ? 'OK' : 'Low Liquidity ⚠️'; Excludes inventory."
         }
       )
     );
@@ -3576,19 +3618,25 @@ export function analyze(data, profile = 'default', options = {}) {
           : interestCovRow === ffoInterestCovRow
             ? 'Interest Coverage (Operating Cash Flow / Interest)'
             : 'Interest Coverage (EBITDA / Interest)';
+      const notInterpretable = isExplodingCoverage(latest);
       debtItems.push(
         makeItem(
           coverageLabel,
-          `Latest: ${latest?.toFixed(1)}x`,
-          vals,
-          latest > 8 ? 'bull' : latest > 3 ? 'neutral' : 'bear',
-          latest > 15
-            ? 'Fortress'
-            : latest > 8
-              ? 'Well Covered'
-              : latest > 3
-                ? 'OK'
-                : 'Risky ⚠️'
+          notInterpretable ? 'N/A' : `Latest: ${latest?.toFixed(1)}x`,
+          notInterpretable ? [] : vals,
+          notInterpretable ? 'info' : latest > 8 ? 'bull' : latest > 3 ? 'neutral' : 'bear',
+          notInterpretable
+            ? 'Not interpretable ⚠️'
+            : latest > 15
+              ? 'Fortress'
+              : latest > 8
+                ? 'Well Covered'
+                : latest > 3
+                  ? 'OK'
+                  : 'Risky ⚠️',
+          notInterpretable
+            ? 'Interest coverage appears non-finite or implausibly large (often denominator near zero). Metric excluded from scoring until data extraction is validated.'
+            : ''
         )
       );
     }
@@ -3602,13 +3650,23 @@ export function analyze(data, profile = 'default', options = {}) {
   if (ebitdaMinusCapexCovRow) {
     const vals = getRecentValues(ebitdaMinusCapexCovRow, 6);
     const latest = vals[vals.length - 1];
+    const notInterpretable = isExplodingCoverage(latest);
     debtItems.push(
       makeItem(
         '(EBITDA - Capex) / Interest',
-        `Latest: ${latest?.toFixed(1)}x`,
-        vals,
-        latest > 8 ? 'bull' : latest > 3 ? 'neutral' : 'bear',
-        latest > 8 ? 'Well Covered' : latest > 3 ? 'Adequate' : 'Risky'
+        notInterpretable ? 'N/A' : `Latest: ${latest?.toFixed(1)}x`,
+        notInterpretable ? [] : vals,
+        notInterpretable ? 'info' : latest > 8 ? 'bull' : latest > 3 ? 'neutral' : 'bear',
+        notInterpretable
+          ? 'Not interpretable ⚠️'
+          : latest > 8
+            ? 'Well Covered'
+            : latest > 3
+              ? 'Adequate'
+              : 'Risky',
+        notInterpretable
+          ? 'Coverage appears non-finite or implausibly large (often denominator near zero). Metric excluded from scoring until data extraction is validated.'
+          : ''
       )
     );
   }
@@ -3998,9 +4056,11 @@ export function analyze(data, profile = 'default', options = {}) {
     'Inventory Turnover',
     'Rotación de inventario'
   );
+  let invTurnLatest = null;
   if (invTurnRow) {
     const vals = getRecentValues(invTurnRow, 6);
     const latest = vals[vals.length - 1];
+    invTurnLatest = latest;
     if (latest != null) {
       effItems.push(
         makeItem(
@@ -4021,15 +4081,59 @@ export function analyze(data, profile = 'default', options = {}) {
     }
   }
 
+  const dioRow = findRowAny(
+    ratios,
+    'Days Inventory Outstanding',
+    'Inventory Days',
+    'DIO',
+    'Días de inventario'
+  );
+  let dioLatest = null;
+  if (dioRow) {
+    const vals = getRecentValues(dioRow, 6);
+    const latest = vals[vals.length - 1];
+    dioLatest = latest;
+    if (latest != null) {
+      effItems.push(
+        makeItem(
+          'Days Inventory Outstanding (DIO)',
+          `Latest: ${latest?.toFixed(0)} days`,
+          vals,
+          latest < 45 ? 'bull' : latest < 90 ? 'neutral' : 'bear',
+          latest < 30 ? 'Lean' : latest < 45 ? 'Efficient' : latest < 90 ? 'Normal' : 'Elevated'
+        )
+      );
+    }
+  }
+
+  if (Number.isFinite(dioLatest) && Number.isFinite(invTurnLatest) && invTurnLatest > 0) {
+    const impliedDio = 365 / invTurnLatest;
+    const spreadDays = Math.abs(dioLatest - impliedDio);
+    if (spreadDays > 10) {
+      effItems.push(
+        makeItem(
+          'DIO vs Inventory Turnover Consistency Check',
+          `DIO ${dioLatest.toFixed(1)} days vs implied ${impliedDio.toFixed(1)} days from inventory turnover ${invTurnLatest.toFixed(2)}x (Δ ${spreadDays.toFixed(1)} days)`,
+          [dioLatest, impliedDio],
+          'info',
+          'Definition mismatch ⚠️',
+          'DIO should roughly align with 365 / Inventory Turnover. Recheck period basis (TTM/FY), average-vs-ending inventory, and denominator mapping.'
+        )
+      );
+    }
+  }
+
   // Cash Conversion Cycle
   const cccRow = findRowAny(
     ratios,
     'Cash Conversion Cycle',
     'Ciclo de conversión'
   );
+  let cccLatest = null;
   if (cccRow) {
     const vals = getRecentValues(cccRow, 6);
     const latest = vals[vals.length - 1];
+    cccLatest = latest;
     if (latest != null) {
       effItems.push(
         makeItem(
@@ -4056,9 +4160,11 @@ export function analyze(data, profile = 'default', options = {}) {
     'Days Sales Outstanding',
     'DSO'
   );
+  let dsoLatest = null;
   if (dsoRow) {
     const vals = getRecentValues(dsoRow, 6);
     const latest = vals[vals.length - 1];
+    dsoLatest = latest;
     if (latest != null) {
       effItems.push(
         makeItem(
@@ -4078,15 +4184,38 @@ export function analyze(data, profile = 'default', options = {}) {
     }
   }
 
+  if (Number.isFinite(dsoLatest) && recTurnRow) {
+    const recVals = getRecentValues(recTurnRow, 6);
+    const recLatest = recVals[recVals.length - 1];
+    if (Number.isFinite(recLatest) && recLatest > 0) {
+      const impliedDso = 365 / recLatest;
+      const spreadDays = Math.abs(dsoLatest - impliedDso);
+      if (spreadDays > 10) {
+        effItems.push(
+          makeItem(
+            'DSO vs Receivables Turnover Consistency Check',
+            `DSO ${dsoLatest.toFixed(1)} days vs implied ${impliedDso.toFixed(1)} days from AR turnover ${recLatest.toFixed(2)}x (Δ ${spreadDays.toFixed(1)} days)`,
+            [dsoLatest, impliedDso],
+            'info',
+            'Definition mismatch ⚠️',
+            'DSO should roughly align with 365 / Receivables Turnover. Recheck period basis (TTM/FY), average-vs-ending receivables, and denominator mapping.'
+          )
+        );
+      }
+    }
+  }
+
   const dpoRow = findRowAny(
     ratios,
     'Promedio Días a pagar pendientes',
     'Days Payable Outstanding',
     'DPO'
   );
+  let dpoLatest = null;
   if (dpoRow) {
     const vals = getRecentValues(dpoRow, 6);
     const latest = vals[vals.length - 1];
+    dpoLatest = latest;
     if (latest != null) {
       effItems.push(
         makeItem(
@@ -4095,6 +4224,28 @@ export function analyze(data, profile = 'default', options = {}) {
           vals,
           latest > 60 ? 'bull' : latest > 35 ? 'neutral' : 'bear',
           latest > 75 ? 'Strong supplier float (supplier financing)' : latest > 35 ? 'Normal' : 'Low payables float'
+        )
+      );
+    }
+  }
+
+  if (
+    Number.isFinite(cccLatest) &&
+    Number.isFinite(dioLatest) &&
+    Number.isFinite(dsoLatest) &&
+    Number.isFinite(dpoLatest)
+  ) {
+    const impliedCcc = dioLatest + dsoLatest - dpoLatest;
+    const spreadDays = Math.abs(cccLatest - impliedCcc);
+    if (spreadDays > 10) {
+      effItems.push(
+        makeItem(
+          'CCC vs DIO+DSO-DPO Consistency Check',
+          `CCC ${cccLatest.toFixed(1)} days vs implied ${impliedCcc.toFixed(1)} days from DIO ${dioLatest.toFixed(1)} + DSO ${dsoLatest.toFixed(1)} - DPO ${dpoLatest.toFixed(1)} (Δ ${spreadDays.toFixed(1)} days)`,
+          [cccLatest, impliedCcc],
+          'info',
+          'Definition mismatch ⚠️',
+          'CCC should roughly match DIO + DSO - DPO using a consistent period basis. Recheck TTM/FY alignment and component definitions.'
         )
       );
     }
@@ -4244,6 +4395,8 @@ export function analyze(data, profile = 'default', options = {}) {
   // ══════════════════════════════════════════════════════════
   const valItems = [];
 
+  const invalidMultipleValue = (value) => !Number.isFinite(value) || value <= 0;
+
   // Market Cap & EV
   const vmOrIS = vm || is;
   const evResolution = resolveEnterpriseValueLatest();
@@ -4331,13 +4484,23 @@ export function analyze(data, profile = 'default', options = {}) {
   if (evIsValid && evRevenueNtmRow) {
     const vals = getRecentValues(evRevenueNtmRow, 8);
     const latest = vals[vals.length - 1];
+    const invalidMultiple = !Number.isFinite(latest) || latest <= 0;
     valItems.push(
       makeItem(
         'EV / Revenues (NTM)',
-        `Latest: ${latest?.toFixed(2)}x`,
-        vals,
-        latest < 5 ? 'bull' : latest < 10 ? 'neutral' : 'bear',
-        latest < 5 ? 'Reasonable' : latest < 10 ? 'Growth Premium' : 'Rich'
+        invalidMultiple ? 'N/A' : `Latest: ${latest?.toFixed(2)}x`,
+        invalidMultiple ? [] : vals,
+        invalidMultiple ? 'info' : latest < 5 ? 'bull' : latest < 10 ? 'neutral' : 'bear',
+        invalidMultiple
+          ? 'Data issue ⚠️'
+          : latest < 5
+            ? 'Reasonable'
+            : latest < 10
+              ? 'Growth Premium'
+              : 'Rich',
+        invalidMultiple
+          ? 'EV / Revenues is non-positive or non-finite. Metric excluded from scoring until data extraction is validated.'
+          : ''
       )
     );
   }
@@ -4345,23 +4508,30 @@ export function analyze(data, profile = 'default', options = {}) {
     const vals = getRecentValues(peRow, 8);
     const latest = vals[vals.length - 1];
     const avgPE = avg(vals);
-    const belowAvg = latest < avgPE;
+    const invalidMultiple = invalidMultipleValue(latest);
+    const belowAvg = !invalidMultiple && latest < avgPE;
     valItems.push(
       makeItem(
         'Forward P/E (NTM)',
-        `Latest: ${latest?.toFixed(1)}x | Hist Avg: ${avgPE?.toFixed(1)}x`,
-        vals,
-        latest < 18 ? 'bull' : latest < 30 ? 'neutral' : 'bear',
-        latest < 15
-          ? 'Deep Value'
-          : latest < 18
-            ? 'Cheap'
-            : latest < 30
-              ? 'Fair'
-              : 'Expensive',
-        belowAvg
-          ? '📉 Below historical average — potentially attractive'
-          : '📈 Above historical average'
+        invalidMultiple
+          ? 'N/A'
+          : `Latest: ${latest?.toFixed(1)}x | Hist Avg: ${avgPE?.toFixed(1)}x`,
+        invalidMultiple ? [] : vals,
+        invalidMultiple ? 'info' : latest < 18 ? 'bull' : latest < 30 ? 'neutral' : 'bear',
+        invalidMultiple
+          ? 'Data issue ⚠️'
+          : latest < 15
+            ? 'Deep Value'
+            : latest < 18
+              ? 'Cheap'
+              : latest < 30
+                ? 'Fair'
+                : 'Expensive',
+        invalidMultiple
+          ? 'Forward P/E is non-positive or non-finite. Metric excluded from scoring until data extraction is validated.'
+          : belowAvg
+            ? '📉 Below historical average — potentially attractive'
+            : '📈 Above historical average'
       )
     );
   }
@@ -4371,19 +4541,25 @@ export function analyze(data, profile = 'default', options = {}) {
   if (psRow) {
     const vals = getRecentValues(psRow, 8);
     const latest = vals[vals.length - 1];
+    const invalidMultiple = invalidMultipleValue(latest);
     valItems.push(
       makeItem(
         'Price / Sales',
-        `Latest: ${latest?.toFixed(1)}x`,
-        vals,
-        latest < 3 ? 'bull' : latest < 8 ? 'neutral' : 'bear',
-        latest < 2
-          ? 'Deep Value'
-          : latest < 3
-            ? 'Reasonable'
-            : latest < 8
-              ? 'Growth Premium'
-              : 'Very Rich'
+        invalidMultiple ? 'N/A' : `Latest: ${latest?.toFixed(1)}x`,
+        invalidMultiple ? [] : vals,
+        invalidMultiple ? 'info' : latest < 3 ? 'bull' : latest < 8 ? 'neutral' : 'bear',
+        invalidMultiple
+          ? 'Data issue ⚠️'
+          : latest < 2
+            ? 'Deep Value'
+            : latest < 3
+              ? 'Reasonable'
+              : latest < 8
+                ? 'Growth Premium'
+                : 'Very Rich',
+        invalidMultiple
+          ? 'Price / Sales is non-positive or non-finite. Metric excluded from scoring until data extraction is validated.'
+          : ''
       )
     );
   }
@@ -4393,22 +4569,27 @@ export function analyze(data, profile = 'default', options = {}) {
   if (pbRow) {
     const vals = getRecentValues(pbRow, 8);
     const latest = vals[vals.length - 1];
+    const invalidMultiple = invalidMultipleValue(latest);
     valItems.push(
       makeItem(
         'Price / Book Value',
-        `Latest: ${latest?.toFixed(1)}x`,
-        vals,
-        latest < 3 ? 'bull' : latest < 8 ? 'neutral' : 'bear',
-        latest < 1.5
-          ? 'Below Book'
-          : latest < 3
-            ? 'Reasonable'
-            : latest < 8
-              ? 'Premium'
-              : 'Very Rich',
-        latest < 1
-          ? 'Trading below book value — potential deep value or value trap'
-          : ''
+        invalidMultiple ? 'N/A' : `Latest: ${latest?.toFixed(1)}x`,
+        invalidMultiple ? [] : vals,
+        invalidMultiple ? 'info' : latest < 3 ? 'bull' : latest < 8 ? 'neutral' : 'bear',
+        invalidMultiple
+          ? 'Not interpretable ⚠️'
+          : latest < 1.5
+            ? 'Below Book'
+            : latest < 3
+              ? 'Reasonable'
+              : latest < 8
+                ? 'Premium'
+                : 'Very Rich',
+        invalidMultiple
+          ? 'Price / Book is non-positive or non-finite (often due to non-positive equity). Metric excluded from scoring.'
+          : latest < 1
+            ? 'Trading below book value — potential deep value or value trap'
+            : ''
       )
     );
   }
@@ -4430,29 +4611,44 @@ export function analyze(data, profile = 'default', options = {}) {
       )
     );
   }
+  let evEbitdaItem = null;
+  let evEbitItem = null;
+  let evEbitdaLatest = null;
+  let evEbitLatest = null;
+
   if (evIsValid && evEbitdaRow) {
     const vals = getRecentValues(evEbitdaRow, 8);
     const latest = vals[vals.length - 1];
+    evEbitdaLatest = latest;
     const avgVal = avg(vals);
-    valItems.push(
-      makeItem(
-        'EV/EBITDA (NTM)',
-        `Latest: ${latest?.toFixed(1)}x | Hist Avg: ${avgVal?.toFixed(1)}x`,
-        vals,
-        latest < mt('ev_ebitda', 'bull')
+    const invalidMultiple = !Number.isFinite(latest) || latest <= 0;
+    evEbitdaItem = makeItem(
+      'EV/EBITDA (NTM)',
+      invalidMultiple
+        ? 'N/A'
+        : `Latest: ${latest?.toFixed(1)}x | Hist Avg: ${avgVal?.toFixed(1)}x`,
+      invalidMultiple ? [] : vals,
+      invalidMultiple
+        ? 'info'
+        : latest < mt('ev_ebitda', 'bull')
           ? 'bull'
           : latest < mt('ev_ebitda', 'neutral')
             ? 'neutral'
             : 'bear',
-        latest < mt('ev_ebitda', 'bull') - 2
+      invalidMultiple
+        ? 'Data issue ⚠️'
+        : latest < mt('ev_ebitda', 'bull') - 2
           ? 'Cheap'
           : latest < mt('ev_ebitda', 'bull')
             ? 'Attractive'
             : latest < mt('ev_ebitda', 'neutral')
               ? 'Fair'
-              : 'Rich'
-      )
+              : 'Rich',
+      invalidMultiple
+        ? 'EV/EBITDA is non-positive or non-finite. Metric excluded from scoring until data extraction is validated.'
+        : ''
     );
+    valItems.push(evEbitdaItem);
   }
 
   // EV/EBIT
@@ -4477,21 +4673,50 @@ export function analyze(data, profile = 'default', options = {}) {
   if (evIsValid && evEbitRow) {
     const vals = getRecentValues(evEbitRow, 8);
     const latest = vals[vals.length - 1];
-    valItems.push(
-      makeItem(
-        'EV/EBIT',
-        `Latest: ${latest?.toFixed(1)}x`,
-        vals,
-        latest < 15 ? 'bull' : latest < 25 ? 'neutral' : 'bear',
-        latest < 12
+    evEbitLatest = latest;
+    const invalidMultiple = !Number.isFinite(latest) || latest <= 0;
+    evEbitItem = makeItem(
+      'EV/EBIT',
+      invalidMultiple ? 'N/A' : `Latest: ${latest?.toFixed(1)}x`,
+      invalidMultiple ? [] : vals,
+      invalidMultiple ? 'info' : latest < 15 ? 'bull' : latest < 25 ? 'neutral' : 'bear',
+      invalidMultiple
+        ? 'Data issue ⚠️'
+        : latest < 12
           ? 'Cheap'
           : latest < 15
             ? 'Attractive'
             : latest < 25
               ? 'Fair'
-              : 'Expensive'
-      )
+              : 'Expensive',
+      invalidMultiple
+        ? 'EV/EBIT is non-positive or non-finite. Metric excluded from scoring until data extraction is validated.'
+        : ''
     );
+    valItems.push(evEbitItem);
+  }
+
+  const evMultiplesLookSuspiciouslyEqual =
+    evEbitdaLatest !== null &&
+    evEbitLatest !== null &&
+    evEbitdaLatest > 0 &&
+    evEbitLatest > 0 &&
+    Math.abs(evEbitdaLatest - evEbitLatest) / Math.max(evEbitdaLatest, evEbitLatest) <
+      0.02;
+  if (evMultiplesLookSuspiciouslyEqual) {
+    const sanityWarning =
+      currentLang === 'es'
+        ? 'Posible data_issue: EV/EBIT y EV/EBITDA son casi idénticos de forma anómala; revisar mapeo de campos (EBIT vs EBITDA). No se puntúan estos múltiplos hasta validar la extracción.'
+        : 'Potential data issue: EV/EBIT and EV/EBITDA are anomalously almost identical; review field mapping (EBIT vs EBITDA). Both multiples are excluded from scoring until extraction is validated.';
+
+    [evEbitdaItem, evEbitItem].forEach((item) => {
+      if (!item) return;
+      item.signal = 'info';
+      item.signalText = currentLang === 'es' ? 'Data issue ⚠️' : 'Data issue ⚠️';
+      item.explanation = sanityWarning;
+      item.detail = `${item.detail}\n${sanityWarning}`;
+      item.scoreRule = currentLang === 'es' ? 'No puntuar (data_issue)' : 'Do not score (data_issue)';
+    });
   }
 
   // Price / FCF
@@ -4499,19 +4724,25 @@ export function analyze(data, profile = 'default', options = {}) {
   if (pfcfRow) {
     const vals = getRecentValues(pfcfRow, 8);
     const latest = vals[vals.length - 1];
+    const invalidMultiple = invalidMultipleValue(latest);
     valItems.push(
       makeItem(
         'Price / Free Cash Flow',
-        `Latest: ${latest?.toFixed(1)}x`,
-        vals,
-        latest < 20 ? 'bull' : latest < 35 ? 'neutral' : 'bear',
-        latest < 15
-          ? 'Cheap'
-          : latest < 20
-            ? 'Attractive'
-            : latest < 35
-              ? 'Fair'
-              : 'Expensive'
+        invalidMultiple ? 'N/A' : `Latest: ${latest?.toFixed(1)}x`,
+        invalidMultiple ? [] : vals,
+        invalidMultiple ? 'info' : latest < 20 ? 'bull' : latest < 35 ? 'neutral' : 'bear',
+        invalidMultiple
+          ? 'Data issue ⚠️'
+          : latest < 15
+            ? 'Cheap'
+            : latest < 20
+              ? 'Attractive'
+              : latest < 35
+                ? 'Fair'
+                : 'Expensive',
+        invalidMultiple
+          ? 'Price / Free Cash Flow is non-positive or non-finite. Metric excluded from scoring until data extraction is validated.'
+          : ''
       )
     );
   }
@@ -4523,13 +4754,23 @@ export function analyze(data, profile = 'default', options = {}) {
   if (mcapFcfNtmRow) {
     const vals = getRecentValues(mcapFcfNtmRow, 8);
     const latest = vals[vals.length - 1];
+    const invalidMultiple = invalidMultipleValue(latest);
     valItems.push(
       makeItem(
         'Market Cap / Free Cash Flow (NTM)',
-        `Latest: ${latest?.toFixed(1)}x`,
-        vals,
-        latest < 20 ? 'bull' : latest < 35 ? 'neutral' : 'bear',
-        latest < 20 ? 'Attractive' : latest < 35 ? 'Fair' : 'Demanding'
+        invalidMultiple ? 'N/A' : `Latest: ${latest?.toFixed(1)}x`,
+        invalidMultiple ? [] : vals,
+        invalidMultiple ? 'info' : latest < 20 ? 'bull' : latest < 35 ? 'neutral' : 'bear',
+        invalidMultiple
+          ? 'Data issue ⚠️'
+          : latest < 20
+            ? 'Attractive'
+            : latest < 35
+              ? 'Fair'
+              : 'Demanding',
+        invalidMultiple
+          ? 'Market Cap / Free Cash Flow (NTM) is non-positive or non-finite. Metric excluded from scoring until data extraction is validated.'
+          : ''
       )
     );
   }
@@ -4598,6 +4839,21 @@ export function analyze(data, profile = 'default', options = {}) {
       );
       return;
     }
+
+    if (isEvMultiple && (!Number.isFinite(latest) || latest <= 0)) {
+      valItems.push(
+        makeItem(
+          String(name),
+          'N/A',
+          [],
+          'info',
+          'Data issue ⚠️',
+          'EV-based LTM multiple is non-positive or non-finite. Metric excluded from scoring until data extraction is validated.'
+        )
+      );
+      return;
+    }
+
     valItems.push(
       makeItem(
         String(name),
@@ -4614,24 +4870,57 @@ export function analyze(data, profile = 'default', options = {}) {
     'Levered Free Cash Flow Yield',
     'FCF Yield'
   );
+  let fcfYieldLatest = null;
   if (fcfYieldRow) {
     const vals = getRecentValues(fcfYieldRow, 8);
     const latest = vals[vals.length - 1];
+    fcfYieldLatest = latest;
+    const invalidYield = !Number.isFinite(latest) || latest <= 0;
     valItems.push(
       makeItem(
         'FCF Yield (NTM)',
-        `Latest: ${latest?.toFixed(1)}%`,
-        vals,
-        latest > 5 ? 'bull' : latest > 3 ? 'neutral' : 'bear',
-        latest > 7
-          ? 'Very Attractive'
-          : latest > 5
-            ? 'Good Value'
-            : latest > 3
-              ? 'Fair'
-              : 'Low Yield'
+        invalidYield ? 'N/A' : `Latest: ${latest?.toFixed(1)}%`,
+        invalidYield ? [] : vals,
+        invalidYield ? 'info' : latest > 5 ? 'bull' : latest > 3 ? 'neutral' : 'bear',
+        invalidYield
+          ? 'Data issue ⚠️'
+          : latest > 7
+            ? 'Very Attractive'
+            : latest > 5
+              ? 'Good Value'
+              : latest > 3
+                ? 'Fair'
+                : 'Low Yield',
+        invalidYield
+          ? 'FCF yield is non-positive or non-finite. Metric excluded from scoring until data extraction is validated.'
+          : ''
       )
     );
+  }
+
+  if (
+    Number.isFinite(fcfYieldLatest) &&
+    fcfYieldLatest > 0 &&
+    mcapFcfNtmRow
+  ) {
+    const pfcfVals = getRecentValues(mcapFcfNtmRow, 8);
+    const latestPfcf = pfcfVals[pfcfVals.length - 1];
+    if (Number.isFinite(latestPfcf) && latestPfcf > 0) {
+      const impliedYield = 100 / latestPfcf;
+      const spread = Math.abs(fcfYieldLatest - impliedYield);
+      if (spread > 1) {
+        valItems.push(
+          makeItem(
+            'FCF Yield vs P/FCF Consistency Check',
+            `FCF Yield ${fcfYieldLatest.toFixed(1)}% vs implied ${(impliedYield).toFixed(1)}% from P/FCF ${latestPfcf.toFixed(1)}x (Δ ${spread.toFixed(1)}pp)`,
+            [fcfYieldLatest, impliedYield],
+            'info',
+            'Definition mismatch ⚠️',
+            'FCF yield should be the inverse of P/FCF (same period/definition). Recheck NTM/LTM basis and levered vs unlevered FCF mapping.'
+          )
+        );
+      }
+    }
   }
 
   // Dividend Yield
@@ -5403,6 +5692,31 @@ export function analyze(data, profile = 'default', options = {}) {
         { tip: METRIC_TIPS.netDebt }
       )
     );
+
+    const evLatest = resolveEnterpriseValueLatest().enterpriseValue;
+    const mcLatest = resolveMarketCapLatest().marketCap;
+    if (
+      Number.isFinite(evLatest) &&
+      Number.isFinite(mcLatest) &&
+      mcLatest > 0 &&
+      evLatest > 0
+    ) {
+      const evImpliesNetCash = evLatest < mcLatest;
+      const netDebtSignConflict =
+        (evImpliesNetCash && netDebt > 0) || (!evImpliesNetCash && netDebt < 0);
+      if (netDebtSignConflict) {
+        balanceItems.push(
+          makeItem(
+            'EV vs Net Debt Consistency Check',
+            `EV ${evLatest < mcLatest ? '<' : '>='} MC (${evLatest.toFixed(0)} vs ${mcLatest.toFixed(0)}) while computed net debt is ${netDebt.toFixed(0)}`,
+            [evLatest, mcLatest, netDebt],
+            'info',
+            'Definition mismatch ⚠️',
+            'EV/Market Cap and Net Debt sign are contradictory. Revisit cash definition (cash vs cash + short-term investments) and source units before scoring leverage conclusions.'
+          )
+        );
+      }
+    }
   }
   if (stDebtL !== null && stDebtL > 0 && cashL !== null) {
     const cov = cashL / stDebtL;

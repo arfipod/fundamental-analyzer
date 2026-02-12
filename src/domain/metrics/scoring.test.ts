@@ -272,6 +272,428 @@ describe('analysis regressions for alignment and period handling', () => {
     expect(evEbitda?.signalText).toContain('N/A due to invalid EV/MC');
   });
 
+  it('flags EV/EBIT and EV/EBITDA when they are suspiciously identical', () => {
+    setLanguage('en');
+    const dates = ['2022', '2023', '2024'];
+    const data = {
+      company: 'Mapping Risk Inc',
+      sections: {
+        'Income Statement': { dates, rows: [{ label: 'Revenue', values: ['100', '110', '120'], dates }] },
+        'Balance Sheet': { dates, rows: [] },
+        Ratios: { dates, rows: [] },
+        'Cash Flow': { dates, rows: [] },
+        'Valuation Multiples': {
+          dates,
+          rows: [
+            { label: 'Market Cap', values: ['1000', '1100', '1200'], dates },
+            { label: 'Enterprise Value', values: ['1100', '1200', '1300'], dates },
+            { label: 'NTM Total Enterprise Value / EBITDA', values: ['11.9', '12.0', '12.0'], dates },
+            { label: 'EV/EBIT', values: ['12.0', '12.1', '12.0'], dates }
+          ]
+        }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false }) as {
+      sections: ResultSection[];
+    };
+
+    const valuation = results.sections.find((s) => s.id === 'valuation');
+    const evEbitda = valuation?.items.find((i) => i.name === 'EV/EBITDA (NTM)');
+    const evEbit = valuation?.items.find((i) => i.name === 'EV/EBIT');
+
+    expect(evEbitda?.signal).toBe('info');
+    expect(evEbit?.signal).toBe('info');
+    expect(evEbitda?.signalText).toContain('Data issue');
+    expect(evEbit?.explanation || '').toContain('excluded from scoring');
+    expect((evEbitda as { scoreRule?: string } | undefined)?.scoreRule || '').toContain('Do not score');
+  });
+
+
+  it('marks EV-based multiples as data issues when non-positive', () => {
+    setLanguage('en');
+    const dates = ['2022', '2023', '2024'];
+    const data = {
+      company: 'Invalid Multiples LLC',
+      sections: {
+        'Income Statement': { dates, rows: [{ label: 'Revenue', values: ['100', '110', '120'], dates }] },
+        'Balance Sheet': { dates, rows: [] },
+        Ratios: { dates, rows: [] },
+        'Cash Flow': { dates, rows: [] },
+        'Valuation Multiples': {
+          dates,
+          rows: [
+            { label: 'Market Cap', values: ['1000', '1100', '1200'], dates },
+            { label: 'Enterprise Value', values: ['1200', '1300', '1400'], dates },
+            { label: 'NTM EV / Revenues', values: ['3.2', '0', '-1'], dates },
+            { label: 'NTM Total Enterprise Value / EBITDA', values: ['10', '0', '0'], dates },
+            { label: 'EV/EBIT', values: ['14', '-2', '0'], dates }
+          ]
+        }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false }) as {
+      sections: ResultSection[];
+    };
+
+    const valuation = results.sections.find((s) => s.id === 'valuation');
+    const evRev = valuation?.items.find((i) => i.name === 'EV / Revenues (NTM)');
+    const evEbitda = valuation?.items.find((i) => i.name === 'EV/EBITDA (NTM)');
+    const evEbit = valuation?.items.find((i) => i.name === 'EV/EBIT');
+
+    expect(evRev?.signal).toBe('info');
+    expect(evEbitda?.signal).toBe('info');
+    expect(evEbit?.signal).toBe('info');
+    expect(evEbitda?.signalText).toContain('Data issue');
+    expect(evEbit?.explanation || '').toContain('excluded from scoring');
+  });
+
+
+
+
+  it('adds gross margin vs COGS consistency warning when they do not sum near 100%', () => {
+    setLanguage('en');
+    const dates = ['2022', '2023', '2024'];
+    const data = {
+      company: 'Margin Mapping Inc',
+      sections: {
+        'Income Statement': {
+          dates,
+          rows: [
+            { label: 'Revenues', values: ['100', '120', '150'], dates },
+            { label: '% Gross Margins', values: ['60', '62', '65'], dates },
+            { label: 'Cost of Goods Sold', values: ['55', '66', '82.5'], dates }
+          ]
+        },
+        'Balance Sheet': { dates, rows: [] },
+        Ratios: { dates, rows: [] },
+        'Cash Flow': { dates, rows: [] },
+        'Valuation Multiples': { dates, rows: [] }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false }) as {
+      sections: ResultSection[];
+    };
+
+    const costs = results.sections.find((s) => s.id === 'costs');
+    const consistency = costs?.items.find(
+      (i) => i.name === 'Gross Margin vs COGS Consistency Check'
+    );
+
+    expect(consistency).toBeTruthy();
+    expect(consistency?.signal).toBe('info');
+    expect(consistency?.signalText).toContain('Definition mismatch');
+  });
+
+  it('marks key non-EV valuation multiples as data issues when non-positive', () => {
+    setLanguage('en');
+    const dates = ['2022', '2023', '2024'];
+    const data = {
+      company: 'Broken Multiples SA',
+      sections: {
+        'Income Statement': { dates, rows: [{ label: 'Revenue', values: ['100', '110', '120'], dates }] },
+        'Balance Sheet': { dates, rows: [] },
+        Ratios: { dates, rows: [] },
+        'Cash Flow': { dates, rows: [] },
+        'Valuation Multiples': {
+          dates,
+          rows: [
+            { label: 'Market Cap', values: ['1000', '1100', '1200'], dates },
+            { label: 'Enterprise Value', values: ['1300', '1400', '1500'], dates },
+            { label: 'NTM P/E', values: ['22', '0', '-5'], dates },
+            { label: 'P/S', values: ['5', '0', '0'], dates },
+            { label: 'P/B', values: ['4', '-1', '-2'], dates },
+            { label: 'P/FCF', values: ['25', '-3', '0'], dates },
+            { label: 'NTM Market Cap / Free Cash Flow', values: ['20', '0', '-1'], dates }
+          ]
+        }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false }) as {
+      sections: ResultSection[];
+    };
+
+    const valuation = results.sections.find((s) => s.id === 'valuation');
+    const pe = valuation?.items.find((i) => i.name === 'Forward P/E (NTM)');
+    const ps = valuation?.items.find((i) => i.name === 'Price / Sales');
+    const pb = valuation?.items.find((i) => i.name === 'Price / Book Value');
+    const pfcf = valuation?.items.find((i) => i.name === 'Price / Free Cash Flow');
+    const mcapFcf = valuation?.items.find((i) => i.name === 'Market Cap / Free Cash Flow (NTM)');
+
+    [pe, ps, pb, pfcf, mcapFcf].forEach((item) => {
+      expect(item?.signal).toBe('info');
+      expect(item?.detail || '').toContain('N/A');
+    });
+    expect(pb?.signalText).toContain('Not interpretable');
+  });
+
+
+
+
+
+  it('adds CCC vs components consistency warning when CCC != DIO + DSO - DPO', () => {
+    setLanguage('en');
+    const dates = ['2022', '2023', '2024'];
+    const data = {
+      company: 'CCC Mismatch Ltd',
+      sections: {
+        'Income Statement': { dates, rows: [{ label: 'Revenues', values: ['100', '120', '140'], dates }] },
+        'Balance Sheet': { dates, rows: [] },
+        Ratios: {
+          dates,
+          rows: [
+            { label: 'Cash Conversion Cycle', values: ['35', '38', '70'], dates },
+            { label: 'DIO', values: ['30', '32', '35'], dates },
+            { label: 'DSO', values: ['25', '27', '30'], dates },
+            { label: 'DPO', values: ['35', '36', '40'], dates }
+          ]
+        },
+        'Cash Flow': { dates, rows: [] },
+        'Valuation Multiples': { dates, rows: [] }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false }) as {
+      sections: ResultSection[];
+    };
+
+    const efficiency = results.sections.find((s) => s.id === 'efficiency');
+    const consistency = efficiency?.items.find(
+      (i) => i.name === 'CCC vs DIO+DSO-DPO Consistency Check'
+    );
+
+    expect(consistency).toBeTruthy();
+    expect(consistency?.signal).toBe('info');
+    expect(consistency?.signalText).toContain('Definition mismatch');
+  });
+
+  it('adds DIO vs inventory turnover consistency warning when inverse relation breaks', () => {
+    setLanguage('en');
+    const dates = ['2022', '2023', '2024'];
+    const data = {
+      company: 'Inventory Mismatch Ltd',
+      sections: {
+        'Income Statement': { dates, rows: [{ label: 'Revenues', values: ['100', '120', '140'], dates }] },
+        'Balance Sheet': { dates, rows: [] },
+        Ratios: {
+          dates,
+          rows: [
+            { label: 'DIO', values: ['55', '60', '85'], dates },
+            { label: 'Inventory Turnover', values: ['5', '5.5', '8'], dates }
+          ]
+        },
+        'Cash Flow': { dates, rows: [] },
+        'Valuation Multiples': { dates, rows: [] }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false }) as {
+      sections: ResultSection[];
+    };
+
+    const efficiency = results.sections.find((s) => s.id === 'efficiency');
+    const consistency = efficiency?.items.find(
+      (i) => i.name === 'DIO vs Inventory Turnover Consistency Check'
+    );
+
+    expect(consistency).toBeTruthy();
+    expect(consistency?.signal).toBe('info');
+    expect(consistency?.signalText).toContain('Definition mismatch');
+  });
+
+  it('adds DSO vs receivables turnover consistency warning when inverse relation breaks', () => {
+    setLanguage('en');
+    const dates = ['2022', '2023', '2024'];
+    const data = {
+      company: 'AR Mismatch Ltd',
+      sections: {
+        'Income Statement': { dates, rows: [{ label: 'Revenues', values: ['100', '120', '140'], dates }] },
+        'Balance Sheet': { dates, rows: [] },
+        Ratios: {
+          dates,
+          rows: [
+            { label: 'DSO', values: ['40', '42', '80'], dates },
+            { label: 'Receivables Turnover', values: ['9', '8.5', '12'], dates }
+          ]
+        },
+        'Cash Flow': { dates, rows: [] },
+        'Valuation Multiples': { dates, rows: [] }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false }) as {
+      sections: ResultSection[];
+    };
+
+    const efficiency = results.sections.find((s) => s.id === 'efficiency');
+    const consistency = efficiency?.items.find(
+      (i) => i.name === 'DSO vs Receivables Turnover Consistency Check'
+    );
+
+    expect(consistency).toBeTruthy();
+    expect(consistency?.signal).toBe('info');
+    expect(consistency?.signalText).toContain('Definition mismatch');
+  });
+
+  it('adds FCF yield vs P/FCF consistency warning when inverse relation breaks', () => {
+    setLanguage('en');
+    const dates = ['2022', '2023', '2024'];
+    const data = {
+      company: 'Yield Mismatch Co',
+      sections: {
+        'Income Statement': { dates, rows: [{ label: 'Revenue', values: ['100', '110', '120'], dates }] },
+        'Balance Sheet': { dates, rows: [] },
+        Ratios: { dates, rows: [] },
+        'Cash Flow': { dates, rows: [] },
+        'Valuation Multiples': {
+          dates,
+          rows: [
+            { label: 'Market Cap', values: ['1000', '1100', '1200'], dates },
+            { label: 'Enterprise Value', values: ['1300', '1400', '1500'], dates },
+            { label: 'FCF Yield', values: ['4', '5', '8'], dates },
+            { label: 'NTM Market Cap / Free Cash Flow', values: ['20', '20', '20'], dates }
+          ]
+        }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false }) as {
+      sections: ResultSection[];
+    };
+
+    const valuation = results.sections.find((s) => s.id === 'valuation');
+    const consistency = valuation?.items.find(
+      (i) => i.name === 'FCF Yield vs P/FCF Consistency Check'
+    );
+
+    expect(consistency).toBeTruthy();
+    expect(consistency?.signal).toBe('info');
+    expect(consistency?.signalText).toContain('Definition mismatch');
+  });
+
+  it('marks LTM EV multiples as data issues when non-positive', () => {
+    setLanguage('en');
+    const dates = ['2022', '2023', '2024'];
+    const data = {
+      company: 'LTM Issues plc',
+      sections: {
+        'Income Statement': { dates, rows: [{ label: 'Revenue', values: ['100', '110', '120'], dates }] },
+        'Balance Sheet': { dates, rows: [] },
+        Ratios: { dates, rows: [] },
+        'Cash Flow': { dates, rows: [] },
+        'Valuation Multiples': {
+          dates,
+          rows: [
+            { label: 'Market Cap', values: ['1000', '1100', '1200'], dates },
+            { label: 'Enterprise Value', values: ['1200', '1300', '1400'], dates },
+            { label: 'LTM Total Enterprise Value / EBITDA', values: ['9', '4', '0'], dates },
+            { label: 'LTM Total Enterprise Value / EBIT', values: ['10', '5', '-1'], dates }
+          ]
+        }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false }) as {
+      sections: ResultSection[];
+    };
+
+    const valuation = results.sections.find((s) => s.id === 'valuation');
+    const evEbitdaLtm = valuation?.items.find((i) => i.name === 'EV / EBITDA (LTM)');
+    const evEbitLtm = valuation?.items.find((i) => i.name === 'EV / EBIT (LTM)');
+
+    expect(evEbitdaLtm?.signal).toBe('info');
+    expect(evEbitLtm?.signal).toBe('info');
+    expect(evEbitdaLtm?.signalText).toContain('Data issue');
+    expect(evEbitLtm?.explanation || '').toContain('excluded from scoring');
+  });
+
+
+  it('marks liquidity and coverage ratios as not interpretable when invalid or exploding', () => {
+    setLanguage('en');
+    const dates = ['2022', '2023', '2024'];
+    const data = {
+      company: 'Ratio Edge Cases Ltd',
+      sections: {
+        'Income Statement': { dates, rows: [{ label: 'Revenue', values: ['100', '110', '120'], dates }] },
+        'Balance Sheet': { dates, rows: [] },
+        Ratios: {
+          dates,
+          rows: [
+            { label: 'Current Ratio', values: ['1.2', '1.1', '0'], dates },
+            { label: 'Quick Ratio', values: ['1.1', '1.0', '-1'], dates },
+            { label: 'EBIT / Interest Expense', values: ['6', '8', '9999'], dates },
+            { label: '(EBITDA - Capex) / Interest Expense', values: ['4', '5', '5000'], dates }
+          ]
+        },
+        'Cash Flow': { dates, rows: [] },
+        'Valuation Multiples': { dates, rows: [] }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false }) as {
+      sections: ResultSection[];
+    };
+
+    const debt = results.sections.find((s) => s.id === 'debt');
+    const current = debt?.items.find((i) => i.name === 'Current Ratio');
+    const quick = debt?.items.find((i) => i.name === 'Quick Ratio (Acid Test)');
+    const interest = debt?.items.find((i) => i.name === 'Interest Coverage (EBIT / Interest)');
+    const cashlike = debt?.items.find((i) => i.name === '(EBITDA - Capex) / Interest');
+
+    [current, quick, interest, cashlike].forEach((item) => {
+      expect(item?.signal).toBe('info');
+      expect(item?.signalText).toContain('Not interpretable');
+      expect(item?.detail || '').toContain('N/A');
+    });
+  });
+
+  it('adds EV vs Net Debt consistency warning when signs contradict', () => {
+    setLanguage('en');
+    const dates = ['2022', '2023', '2024'];
+    const data = {
+      company: 'Contradiction Corp',
+      sections: {
+        'Income Statement': {
+          dates,
+          rows: [{ label: 'Revenue', values: ['100', '110', '120'], dates }]
+        },
+        'Balance Sheet': {
+          dates,
+          rows: [
+            { label: 'Total Debt', values: ['200', '220', '250'], dates },
+            { label: 'Cash And Equivalents', values: ['40', '45', '50'], dates },
+            { label: 'Short-Term Investments', values: ['0', '0', '0'], dates }
+          ]
+        },
+        Ratios: { dates, rows: [] },
+        'Cash Flow': { dates, rows: [] },
+        'Valuation Multiples': {
+          dates,
+          rows: [
+            { label: 'Market Cap', values: ['1000', '1100', '1200'], dates },
+            { label: 'Enterprise Value', values: ['900', '1000', '1100'], dates }
+          ]
+        }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false }) as {
+      sections: ResultSection[];
+    };
+
+    const balance = results.sections.find((s) => s.id === 'balance');
+    const consistency = balance?.items.find(
+      (i) => i.name === 'EV vs Net Debt Consistency Check'
+    );
+
+    expect(consistency).toBeTruthy();
+    expect(consistency?.signal).toBe('info');
+    expect(consistency?.signalText).toContain('Definition mismatch');
+  });
+
   it('adds interpretation guidance to every generated metric detail', () => {
     setLanguage('en');
     const dates = ['2022', '2023', '2024'];
