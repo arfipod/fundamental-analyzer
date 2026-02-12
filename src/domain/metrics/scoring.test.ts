@@ -224,10 +224,10 @@ describe('FCF Uses Summary formatting', () => {
     const html = renderDashboard(data, results, null);
 
     expect(html).toContain('flujo de caja libre (FCF) total 123324');
-    expect(html).toContain('recompras 97767 (79.3 %)');
-    expect(html).toContain('dividendos 15486 (12.6 %)');
-    expect(html).toContain('amortización de deuda 12085 (9.8 %)');
-    expect(html).toContain('aumento/acumulación de caja 15018 (12.2 %)');
+    expect(html).toContain('recompras 97767 (79.3%)');
+    expect(html).toContain('dividendos 15486 (12.6%)');
+    expect(html).toContain('amortización de deuda 12085 (9.8%)');
+    expect(html).toContain('aumento/acumulación de caja 15018 (12.2%)');
     expect(html).not.toContain('% )');
   });
 });
@@ -667,5 +667,116 @@ Period: Annual`);
 
     expect(parsed.price).toBe('CA$123.45');
     expect(parsed.priceNum).toBe(123.45);
+  });
+});
+
+describe('scoring regressions for period extraction and null-safe growth classification', () => {
+  it('uses the year token from dd/mm/yy labels when computing CAGR windows', () => {
+    setLanguage('en');
+    const dates = ['29/09/20', '28/09/21', '27/09/22', '26/09/23', '28/09/24', '27/09/25'];
+    const data = {
+      company: 'Date Token Corp',
+      sections: {
+        'Income Statement': {
+          dates,
+          rows: [{ label: 'Revenues', values: ['100', '110', '125', '140', '160', '180'], dates }]
+        },
+        'Balance Sheet': { dates, rows: [] },
+        'Cash Flow': { dates, rows: [] },
+        Ratios: { dates, rows: [] }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false }) as {
+      sections: ResultSection[];
+    };
+
+    const growth = results.sections.find((s) => s.id === 'growth');
+    const revenueGrowth = growth?.items.find((item) => item.name === 'Revenue Growth (CAGR)');
+
+    expect(revenueGrowth?.detail).toContain('5Y CAGR');
+  });
+
+  it('marks CAGR growth as info when there is insufficient data', () => {
+    setLanguage('en');
+    const dates = ['2025'];
+    const data = {
+      company: 'Insufficient Corp',
+      sections: {
+        'Income Statement': {
+          dates,
+          rows: [{ label: 'Revenues', values: ['100'], dates }]
+        },
+        'Balance Sheet': { dates, rows: [] },
+        'Cash Flow': { dates, rows: [] },
+        Ratios: { dates, rows: [] }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false }) as {
+      sections: ResultSection[];
+    };
+
+    const growth = results.sections.find((s) => s.id === 'growth');
+    const revenueGrowth = growth?.items.find((item) => item.name === 'Revenue Growth (CAGR)');
+
+    expect(revenueGrowth?.detail).toContain('Insufficient data');
+    expect(revenueGrowth?.signal).toBe('info');
+    expect(revenueGrowth?.signalText).toBe('Insufficient data');
+  });
+
+  it('keeps ltm-only ratio series available instead of returning empty metrics', () => {
+    setLanguage('en');
+    const dates = ['TTM', 'LTM'];
+    const data = {
+      company: 'LTM Only Corp',
+      sections: {
+        'Income Statement': {
+          dates,
+          rows: [
+            { label: 'Revenues', values: ['90', '100'], dates },
+            { label: 'Cost of Goods Sold', values: ['35', '40'], dates }
+          ]
+        },
+        'Balance Sheet': { dates, rows: [] },
+        'Cash Flow': { dates, rows: [] },
+        Ratios: { dates, rows: [] }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false }) as {
+      sections: ResultSection[];
+    };
+
+    const costs = results.sections.find((s) => s.id === 'costs');
+    const cogs = costs?.items.find((item) => item.name === 'COGS as % of Revenue');
+
+    expect(cogs).toBeTruthy();
+    expect(cogs?.detail).toContain('Latest: 40.0%');
+  });
+
+  it('does not inject extra spaces before percent signs in narrative text', () => {
+    setLanguage('en');
+    const html = renderDashboard(
+      { company: 'Percent Corp' },
+      makeResults({ detail: 'Range 1.8% | Guide 5-10% | Interpretation: clean output' })
+    );
+
+    expect(html).toContain('1.8%');
+    expect(html).toContain('5-10%');
+    expect(html).not.toContain('1.8 %');
+    expect(html).not.toContain('5-10 %');
+  });
+
+  it('keeps headline and bullets split correctly when detail uses pipe separators', () => {
+    setLanguage('en');
+    const html = renderDashboard(
+      { company: 'Pipe Corp' },
+      makeResults({ detail: 'Headline summary | Guide range: 5-10% | Interpretation: healthy' })
+    );
+
+    expect(html).toContain('<span class="md-kpi">Headline summary</span>');
+    expect(html).toContain('<span class="md-label">Guide range:</span>');
+    expect(html).toContain('5-10%');
   });
 });
