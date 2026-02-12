@@ -433,6 +433,43 @@ describe('analysis regressions for alignment and period handling', () => {
 
 
 
+
+  it('adds CCC vs components consistency warning when CCC != DIO + DSO - DPO', () => {
+    setLanguage('en');
+    const dates = ['2022', '2023', '2024'];
+    const data = {
+      company: 'CCC Mismatch Ltd',
+      sections: {
+        'Income Statement': { dates, rows: [{ label: 'Revenues', values: ['100', '120', '140'], dates }] },
+        'Balance Sheet': { dates, rows: [] },
+        Ratios: {
+          dates,
+          rows: [
+            { label: 'Cash Conversion Cycle', values: ['35', '38', '70'], dates },
+            { label: 'DIO', values: ['30', '32', '35'], dates },
+            { label: 'DSO', values: ['25', '27', '30'], dates },
+            { label: 'DPO', values: ['35', '36', '40'], dates }
+          ]
+        },
+        'Cash Flow': { dates, rows: [] },
+        'Valuation Multiples': { dates, rows: [] }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false }) as {
+      sections: ResultSection[];
+    };
+
+    const efficiency = results.sections.find((s) => s.id === 'efficiency');
+    const consistency = efficiency?.items.find(
+      (i) => i.name === 'CCC vs DIO+DSO-DPO Consistency Check'
+    );
+
+    expect(consistency).toBeTruthy();
+    expect(consistency?.signal).toBe('info');
+    expect(consistency?.signalText).toContain('Definition mismatch');
+  });
+
   it('adds DIO vs inventory turnover consistency warning when inverse relation breaks', () => {
     setLanguage('en');
     const dates = ['2022', '2023', '2024'];

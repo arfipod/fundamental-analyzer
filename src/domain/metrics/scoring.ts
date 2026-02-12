@@ -4129,9 +4129,11 @@ export function analyze(data, profile = 'default', options = {}) {
     'Cash Conversion Cycle',
     'Ciclo de conversión'
   );
+  let cccLatest = null;
   if (cccRow) {
     const vals = getRecentValues(cccRow, 6);
     const latest = vals[vals.length - 1];
+    cccLatest = latest;
     if (latest != null) {
       effItems.push(
         makeItem(
@@ -4209,9 +4211,11 @@ export function analyze(data, profile = 'default', options = {}) {
     'Days Payable Outstanding',
     'DPO'
   );
+  let dpoLatest = null;
   if (dpoRow) {
     const vals = getRecentValues(dpoRow, 6);
     const latest = vals[vals.length - 1];
+    dpoLatest = latest;
     if (latest != null) {
       effItems.push(
         makeItem(
@@ -4220,6 +4224,28 @@ export function analyze(data, profile = 'default', options = {}) {
           vals,
           latest > 60 ? 'bull' : latest > 35 ? 'neutral' : 'bear',
           latest > 75 ? 'Strong supplier float (supplier financing)' : latest > 35 ? 'Normal' : 'Low payables float'
+        )
+      );
+    }
+  }
+
+  if (
+    Number.isFinite(cccLatest) &&
+    Number.isFinite(dioLatest) &&
+    Number.isFinite(dsoLatest) &&
+    Number.isFinite(dpoLatest)
+  ) {
+    const impliedCcc = dioLatest + dsoLatest - dpoLatest;
+    const spreadDays = Math.abs(cccLatest - impliedCcc);
+    if (spreadDays > 10) {
+      effItems.push(
+        makeItem(
+          'CCC vs DIO+DSO-DPO Consistency Check',
+          `CCC ${cccLatest.toFixed(1)} days vs implied ${impliedCcc.toFixed(1)} days from DIO ${dioLatest.toFixed(1)} + DSO ${dsoLatest.toFixed(1)} - DPO ${dpoLatest.toFixed(1)} (Δ ${spreadDays.toFixed(1)} days)`,
+          [cccLatest, impliedCcc],
+          'info',
+          'Definition mismatch ⚠️',
+          'CCC should roughly match DIO + DSO - DPO using a consistent period basis. Recheck TTM/FY alignment and component definitions.'
         )
       );
     }
