@@ -432,6 +432,41 @@ describe('analysis regressions for alignment and period handling', () => {
 
 
 
+
+  it('adds DIO vs inventory turnover consistency warning when inverse relation breaks', () => {
+    setLanguage('en');
+    const dates = ['2022', '2023', '2024'];
+    const data = {
+      company: 'Inventory Mismatch Ltd',
+      sections: {
+        'Income Statement': { dates, rows: [{ label: 'Revenues', values: ['100', '120', '140'], dates }] },
+        'Balance Sheet': { dates, rows: [] },
+        Ratios: {
+          dates,
+          rows: [
+            { label: 'DIO', values: ['55', '60', '85'], dates },
+            { label: 'Inventory Turnover', values: ['5', '5.5', '8'], dates }
+          ]
+        },
+        'Cash Flow': { dates, rows: [] },
+        'Valuation Multiples': { dates, rows: [] }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false }) as {
+      sections: ResultSection[];
+    };
+
+    const efficiency = results.sections.find((s) => s.id === 'efficiency');
+    const consistency = efficiency?.items.find(
+      (i) => i.name === 'DIO vs Inventory Turnover Consistency Check'
+    );
+
+    expect(consistency).toBeTruthy();
+    expect(consistency?.signal).toBe('info');
+    expect(consistency?.signalText).toContain('Definition mismatch');
+  });
+
   it('adds DSO vs receivables turnover consistency warning when inverse relation breaks', () => {
     setLanguage('en');
     const dates = ['2022', '2023', '2024'];

@@ -4056,9 +4056,11 @@ export function analyze(data, profile = 'default', options = {}) {
     'Inventory Turnover',
     'Rotación de inventario'
   );
+  let invTurnLatest = null;
   if (invTurnRow) {
     const vals = getRecentValues(invTurnRow, 6);
     const latest = vals[vals.length - 1];
+    invTurnLatest = latest;
     if (latest != null) {
       effItems.push(
         makeItem(
@@ -4074,6 +4076,48 @@ export function analyze(data, profile = 'default', options = {}) {
                 ? 'Normal'
                 : 'Slow Moving',
           `≈ ${(365 / latest).toFixed(0)} days inventory on hand`
+        )
+      );
+    }
+  }
+
+  const dioRow = findRowAny(
+    ratios,
+    'Days Inventory Outstanding',
+    'Inventory Days',
+    'DIO',
+    'Días de inventario'
+  );
+  let dioLatest = null;
+  if (dioRow) {
+    const vals = getRecentValues(dioRow, 6);
+    const latest = vals[vals.length - 1];
+    dioLatest = latest;
+    if (latest != null) {
+      effItems.push(
+        makeItem(
+          'Days Inventory Outstanding (DIO)',
+          `Latest: ${latest?.toFixed(0)} days`,
+          vals,
+          latest < 45 ? 'bull' : latest < 90 ? 'neutral' : 'bear',
+          latest < 30 ? 'Lean' : latest < 45 ? 'Efficient' : latest < 90 ? 'Normal' : 'Elevated'
+        )
+      );
+    }
+  }
+
+  if (Number.isFinite(dioLatest) && Number.isFinite(invTurnLatest) && invTurnLatest > 0) {
+    const impliedDio = 365 / invTurnLatest;
+    const spreadDays = Math.abs(dioLatest - impliedDio);
+    if (spreadDays > 10) {
+      effItems.push(
+        makeItem(
+          'DIO vs Inventory Turnover Consistency Check',
+          `DIO ${dioLatest.toFixed(1)} days vs implied ${impliedDio.toFixed(1)} days from inventory turnover ${invTurnLatest.toFixed(2)}x (Δ ${spreadDays.toFixed(1)} days)`,
+          [dioLatest, impliedDio],
+          'info',
+          'Definition mismatch ⚠️',
+          'DIO should roughly align with 365 / Inventory Turnover. Recheck period basis (TTM/FY), average-vs-ending inventory, and denominator mapping.'
         )
       );
     }
