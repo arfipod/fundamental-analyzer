@@ -7,6 +7,12 @@ import {
   renderPrintableMetricDetail
 } from './scoringLocalization';
 
+import {
+  switchDashboardTabUi,
+  toggleAllSectionsUi,
+  toggleSectionUi,
+  updateToggleSectionsButtonUi
+} from './scoringDashboardUi';
 const STORAGE_KEY = 'fundamentalAnalyzerLang';
 const DEFAULT_LANG = 'es';
 
@@ -6086,30 +6092,18 @@ export function renderDashboard(data, results, industrySelection: { code: string
 }
 
 export function updateToggleSectionsButton() {
-  const btn = document.getElementById('toggleSectionsBtn');
-  if (!btn) return;
-  const heads = Array.from(document.querySelectorAll('.section-head'));
-  if (!heads.length) {
-    btn.textContent = t('openAll', 'Open all sections');
-    return;
-  }
-  const allOpen = heads.every((h) => h.classList.contains('open'));
-  btn.textContent = allOpen
-    ? t('collapseAll', 'Collapse all sections')
-    : t('openAll', 'Open all sections');
+  updateToggleSectionsButtonUi(
+    t('collapseAll', 'Collapse all sections'),
+    t('openAll', 'Open all sections')
+  );
 }
 
 export function toggleSection(headEl) {
-  headEl.classList.toggle('open');
-  updateToggleSectionsButton();
+  toggleSectionUi(headEl, updateToggleSectionsButton);
 }
 
 export function toggleAllSections() {
-  const heads = Array.from(document.querySelectorAll('.section-head'));
-  if (!heads.length) return;
-  const allOpen = heads.every((h) => h.classList.contains('open'));
-  heads.forEach((h) => h.classList.toggle('open', !allOpen));
-  updateToggleSectionsButton();
+  toggleAllSectionsUi(updateToggleSectionsButton);
 }
 
 function buildSummary(data, results) {
@@ -6318,12 +6312,7 @@ function buildIndustryPanel(data, results, industry) {
 }
 
 export function switchDashboardTab(tab) {
-  document
-    .querySelectorAll('.dashboard-tab')
-    .forEach((btn) => btn.classList.toggle('active', btn.dataset.tab === tab));
-  document.querySelectorAll('.dashboard-panel').forEach((panel) => {
-    panel.style.display = panel.dataset.panel === tab ? 'block' : 'none';
-  });
+  switchDashboardTabUi(tab);
 }
 
 // =========================================================
