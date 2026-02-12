@@ -111,6 +111,73 @@ describe('analysis pipeline', () => {
     const netDebtNetCash = allItems.find((item) => item.name === 'Net Debt / Net Cash');
     expect(netDebtNetCash?.detail || '').toMatch(/definición consistente de caja|consistent cash definition/i);
   });
+
+  it('avoids MC/EV 0.0B fallback failure on Apple-like input when Market Cap extraction is zero', async () => {
+    const { parseInput } = await import('./parse');
+    const { runAnalysis } = await import('./analyze');
+
+    const markdown = `# – AAPL US$274.62 -US$3.50 -1,26% - TIKR Terminal
+
+Price: | Extracted: 2026-02-10T13:17:26.285Z
+Period: annual | Sections: 7
+
+## Income Statement
+
+| Income Statement | 28/09/24 | 27/09/25 |
+| --- | --- | --- |
+| Revenues | 391.035,00 | 416.161,00 |
+
+## Balance Sheet
+
+| Balance Sheet | 28/09/24 | 27/09/25 |
+| --- | --- | --- |
+| Total Shares Out. on Filing Date | 15.115,82 | 14.776,35 |
+| Total Debt | 119.059,00 | 112.377,00 |
+| Cash And Equivalents | 29.943,00 | 35.934,00 |
+| Short Term Investments | 35.228,00 | 18.763,00 |
+| Long-term Investments | 91.479,00 | 77.723,00 |
+| Current Portion of Long-Term Debt | 10.912,00 | 12.350,00 |
+| Long-Term Debt | 85.750,00 | 78.328,00 |
+| Net Debt | (37.591,00) | (20.043,00) |
+
+## Cash Flow
+
+| Cash Flow Statement | 28/09/24 | 27/09/25 |
+| --- | --- | --- |
+| Repurchase of Common Stock | (100.390,00) | (96.671,00) |
+| Common Dividends Paid | (15.234,00) | (15.421,00) |
+
+## Ratios
+
+| Ratios | 28/09/24 | 27/09/25 |
+| --- | --- | --- |
+| Net Debt / EBITDA | (0,25x) | (0,12x) |
+
+## Valuation Multiples
+
+| Multiples | 27/12/25 | 09/02/26 |
+| --- | --- | --- |
+| Total Enterprise Value (MM) | 4.019.811,91 | 3.977.448,67 |
+| Market Cap (MM) | 0,00 | 0,00 |`;
+
+    const parsed = parseInput(markdown) as ParsedInput;
+    const results = runAnalysis(parsed, 'default', {
+      includeAnalystNoise: false
+    }) as AnalysisResult;
+
+    const allItems = (results.sections || []).flatMap((section: AnalysisSection) =>
+      section.items || []
+    );
+    const evVsMc = allItems.find(
+      (item) => item.name === 'Enterprise Value vs Market Cap'
+    );
+
+    expect(evVsMc).toBeTruthy();
+    expect(evVsMc?.detail || '').toContain('MC from price × shares');
+    expect(evVsMc?.detail || '').not.toContain('MC: $0.0B | EV: $0.0B');
+    expect(evVsMc?.signalText || '').not.toContain('Invalid valuation datapoint');
+  });
+
   it('parses english CSV financial exports and maps them to a statement section', async () => {
     const { parseInput } = await import('./parse');
 
