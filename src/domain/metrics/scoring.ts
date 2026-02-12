@@ -331,6 +331,7 @@ const DYNAMIC_I18N = {
     'Operating Margin (EBIT)': 'Margen operativo (EBIT)',
     'EBITDA Margin': 'Margen EBITDA',
     'FCF Margin': 'Margen de FCF',
+    'Margin Expansion vs Gross': 'Expansión de márgenes vs bruto',
     'Operating Leverage': 'Apalancamiento operativo',
     'COGS as % of Revenue': 'COGS como % de ingresos',
     'Operating Expenses as % of Gross Profit':
@@ -1785,30 +1786,168 @@ const METRIC_INTERPRETATION_LIBRARY = [
 
 
 const METRIC_INTERPRETATION_EXACT = {
-  'operating leverage': {
+  'margin expansion vs gross': {
     en: {
       definition:
-        'Measures how operating margin responds to revenue changes due to fixed vs variable costs.',
+        'Compares gross-margin change versus operating-margin change to see if overhead amplifies or offsets gross improvements.',
       lookFor:
-        'Best setup: revenue up and EBIT margin expands; if revenue is flat, margin resilience is key.',
+        'Healthy pattern: operating margin expands at least as much as gross margin over time.',
       thresholds:
-        'No universal threshold; evaluate direction of margin response through cycles.',
+        'No fixed threshold; assess sign and persistence of gross Δ vs operating Δ across cycles.',
       pitfalls:
-        'Temporary cuts (marketing/R&D) or favorable mix can mimic structural operating leverage.',
+        'Short-term cost cuts or accounting reclassifications can temporarily inflate operating margin expansion.',
       nextQuestions:
-        'Is leverage structural from scale, or temporary from cost cuts?'
+        'Is the operating-margin move structural (efficiency/scale) or temporary (cuts/timing)?'
     },
     es: {
       definition:
-        'Mide la sensibilidad del margen operativo a cambios en ingresos por la estructura de costes fijos/variables.',
+        'Compara el cambio del margen bruto frente al cambio del margen operativo para ver si el overhead amplifica o absorbe la mejora bruta.',
       lookFor:
-        'Señal ideal: ingresos al alza y expansión del margen EBIT; con ingresos planos, que el margen aguante.',
+        'Patrón sano: el margen operativo se expande al menos tanto como el margen bruto.',
       thresholds:
-        'Sin umbral universal; importa la dirección de la respuesta del margen en el ciclo.',
+        'Sin umbral fijo; importa el signo y la persistencia de Δ bruto vs Δ operativo en el ciclo.',
       pitfalls:
-        'Recortes temporales (marketing/I+D) o mix favorable pueden simular apalancamiento estructural.',
+        'Recortes temporales o reclasificaciones contables pueden inflar artificialmente la expansión operativa.',
       nextQuestions:
-        '¿La palanca viene de escala estructural o de recortes coyunturales?'
+        '¿El cambio de margen operativo es estructural (eficiencia/escala) o temporal (recortes/timing)?'
+    }
+  },
+  'operating leverage': {
+    en: {
+      definition:
+        'Proxy check of operating leverage using gross-margin delta vs operating-margin delta (margin expansion/compression lens).',
+      lookFor:
+        'Healthy pattern: operating margin expands at least as much as gross margin over time.',
+      thresholds:
+        'No fixed threshold; assess sign and persistence of gross Δ vs operating Δ across cycles.',
+      pitfalls:
+        'This is a margin-based proxy, not pure Δ%EBIT/Δ%Sales operating leverage.',
+      nextQuestions:
+        'Do margin changes reflect structural efficiency or temporary cost actions?'
+    },
+    es: {
+      definition:
+        'Chequeo proxy de apalancamiento operativo usando Δ margen bruto vs Δ margen operativo (lente de expansión/compresión de márgenes).',
+      lookFor:
+        'Patrón sano: el margen operativo se expande al menos tanto como el margen bruto.',
+      thresholds:
+        'Sin umbral fijo; importa el signo y la persistencia de Δ bruto vs Δ operativo.',
+      pitfalls:
+        'Es una aproximación por márgenes, no el apalancamiento puro Δ%EBIT/Δ%Ventas.',
+      nextQuestions:
+        '¿Los cambios de margen vienen de eficiencia estructural o de recortes temporales?'
+    }
+  },
+  'revenue growth (cagr)': {
+    en: {
+      definition: 'Annualized revenue growth over the effective window (smoothed path, not volatility).',
+      lookFor: 'Read together with margin durability and source of growth quality.',
+      thresholds: 'Contextual by sector/maturity; consistency usually matters more than one peak year.',
+      pitfalls: 'M&A and base effects can distort comparability across windows.',
+      nextQuestions: 'How much of growth is organic versus acquired?'
+    },
+    es: {
+      definition: 'Crecimiento anualizado de ingresos en la ventana efectiva (trayectoria suavizada, no volatilidad).',
+      lookFor: 'Leer junto con durabilidad de márgenes y calidad de la fuente de crecimiento.',
+      thresholds: 'Depende de sector/madurez; la consistencia suele importar más que un pico aislado.',
+      pitfalls: 'M&A y efectos base pueden distorsionar comparabilidad entre ventanas.',
+      nextQuestions: '¿Qué parte del crecimiento es orgánica versus adquirida?'
+    }
+  },
+  'revenue yoy growth': {
+    en: {
+      definition: 'Single-period year-over-year revenue growth, useful for momentum and cyclicality.',
+      lookFor: 'Compare latest YoY with multi-year average and dispersion (σ).',
+      thresholds: 'No universal threshold; stability and trend shape matter.',
+      pitfalls: 'One-year shocks can overstate momentum.',
+      nextQuestions: 'Is current YoY supported by demand and repeatable drivers?'
+    },
+    es: {
+      definition: 'Crecimiento interanual de ingresos de un periodo, útil para momentum y ciclicidad.',
+      lookFor: 'Comparar YoY actual con media multianual y dispersión (σ).',
+      thresholds: 'Sin umbral universal; importan estabilidad y forma de tendencia.',
+      pitfalls: 'Shocks de un año pueden exagerar el momentum.',
+      nextQuestions: '¿El YoY actual está respaldado por demanda y drivers repetibles?'
+    }
+  },
+  'eps growth (diluted)': {
+    en: {
+      definition: 'Tracks per-share earnings compounding after share-count effects.',
+      lookFor: 'Contrast EPS growth versus net income growth and dilution/buyback trends.',
+      thresholds: 'Sustained real growth is preferable to one-off tax/accounting jumps.',
+      pitfalls: 'Buybacks, tax changes, and SBC can move EPS without equivalent operating improvement.',
+      nextQuestions: 'How much EPS growth comes from operations vs capital-allocation effects?'
+    },
+    es: {
+      definition: 'Mide el crecimiento del beneficio por acción tras efectos de recuento de acciones.',
+      lookFor: 'Contrastar crecimiento de BPA con beneficio neto y tendencia de dilución/recompras.',
+      thresholds: 'Mejor crecimiento sostenido real que saltos puntuales fiscales/contables.',
+      pitfalls: 'Recompras, impuestos y SBC pueden mover BPA sin mejora operativa equivalente.',
+      nextQuestions: '¿Qué parte del BPA viene de operación vs asignación de capital?'
+    }
+  },
+  'stock-based comp as % of revenue': {
+    en: {
+      definition: 'Measures equity-based compensation intensity versus revenue and dilution pressure.',
+      lookFor: 'Track alongside diluted shares and net buyback effectiveness.',
+      thresholds: 'Lower/stable is usually healthier for per-share value creation.',
+      pitfalls: 'Treating SBC as “non-cash” can overstate underlying profitability quality.',
+      nextQuestions: 'Are buybacks offsetting SBC dilution on a net basis?'
+    },
+    es: {
+      definition: 'Mide la intensidad de compensación en acciones sobre ingresos y la presión de dilución.',
+      lookFor: 'Seguir junto con acciones diluidas y efectividad neta de recompras.',
+      thresholds: 'Más bajo/estable suele ser más sano para crear valor por acción.',
+      pitfalls: 'Tratar SBC como “no caja” puede sobreestimar la calidad del beneficio subyacente.',
+      nextQuestions: '¿Las recompras compensan la dilución por SBC en términos netos?'
+    }
+  },
+  'revenue vs earnings harmony': {
+    en: {
+      definition: 'Checks whether sales growth and earnings growth move coherently.',
+      lookFor: 'Persistent divergence may indicate margin pressure, mix shifts, or one-offs.',
+      thresholds: 'No hard threshold; repeated spread and direction conflicts are key.',
+      pitfalls: 'A single year mismatch can be normal in cyclical or transition periods.',
+      nextQuestions: 'What explains the revenue-earnings gap: margins, mix, tax, or accounting items?'
+    },
+    es: {
+      definition: 'Comprueba si el crecimiento de ventas y de beneficios se mueve de forma coherente.',
+      lookFor: 'Divergencias persistentes pueden señalar presión de márgenes, cambios de mix o one-offs.',
+      thresholds: 'Sin umbral fijo; importan las brechas repetidas y conflictos de dirección.',
+      pitfalls: 'Un año con desajuste puede ser normal en ciclos/transiciones.',
+      nextQuestions: '¿Qué explica la brecha ventas-beneficios: márgenes, mix, fiscalidad o contabilidad?'
+    }
+  },
+  'cfo vs net income (accrual risk)': {
+    en: {
+      definition: 'Assesses whether accounting earnings are backed by operating cash generation.',
+      lookFor: 'Ratios near/above 1x over time usually indicate stronger earnings quality.',
+      thresholds: 'Sustained sub-1x conversion deserves scrutiny.',
+      pitfalls: 'Working-capital timing can temporarily distort one period.',
+      nextQuestions: 'Is weak conversion structural or timing-driven?'
+    },
+    es: {
+      definition: 'Evalúa si el beneficio contable está respaldado por generación de caja operativa.',
+      lookFor: 'Ratios cercanos/superiores a 1x en el tiempo suelen implicar mejor calidad de beneficios.',
+      thresholds: 'Conversión sostenida por debajo de 1x merece revisión.',
+      pitfalls: 'El timing de capital circulante puede distorsionar un periodo aislado.',
+      nextQuestions: '¿La conversión débil es estructural o de timing?'
+    }
+  },
+  'fcf consistency check': {
+    en: {
+      definition: 'Checks whether free cash flow trend confirms revenue and earnings trends.',
+      lookFor: 'Prefer cash trend that follows or validates accounting performance.',
+      thresholds: 'Repeated “profits up / FCF flat-down” patterns are warning signals.',
+      pitfalls: 'Capex cycles can create temporary divergence.',
+      nextQuestions: 'Is divergence due to reinvestment cycle or weaker cash conversion quality?'
+    },
+    es: {
+      definition: 'Comprueba si la tendencia del FCF confirma la tendencia de ingresos y beneficios.',
+      lookFor: 'Preferible que la caja acompañe/valide el desempeño contable.',
+      thresholds: 'Patrones repetidos de “beneficios al alza / FCF plano-bajista” son alerta.',
+      pitfalls: 'Ciclos de capex pueden crear divergencias temporales.',
+      nextQuestions: '¿La divergencia es ciclo de reinversión o menor calidad de conversión a caja?'
     }
   },
   'sg&a as % of revenue': {
