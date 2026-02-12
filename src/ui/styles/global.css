@@ -401,9 +401,42 @@ body {
   font-size: 0.9rem;
 }
 .a-item .metric-detail {
+  margin-top: 0.45rem;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 0.6rem 0.75rem;
   font-size: 0.8rem;
   color: var(--text-dim);
-  margin-top: 0.15rem;
+}
+.a-item .metric-detail summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+}
+.a-item .metric-detail summary::-webkit-details-marker {
+  display: none;
+}
+.a-item .metric-detail .md-kpi {
+  font-weight: 700;
+  color: var(--text);
+}
+.a-item .metric-detail .md-interpret {
+  color: var(--text-dim);
+}
+.a-item .metric-detail .md-list {
+  margin: 0.55rem 0 0;
+  padding-left: 1.1rem;
+}
+.a-item .metric-detail .md-list li {
+  margin: 0.25rem 0;
+  line-height: 1.35;
+}
+.a-item .metric-detail .md-label {
+  color: var(--text-dim);
+  font-weight: 600;
 }
 .a-item .metric-values {
   font-family: 'JetBrains Mono', monospace;
