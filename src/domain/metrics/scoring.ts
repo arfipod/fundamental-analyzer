@@ -661,6 +661,142 @@ function localizeDynamicText(text) {
   return out;
 }
 
+function parseMetricDetail(detail) {
+  if (!detail) return null;
+  const normalized = String(detail).replace(/\s+/g, ' ').trim();
+  if (!normalized) return null;
+
+  const segments = normalized
+    .split(/\s*[•|]\s*/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  if (!segments.length) return null;
+
+  const interpretationRe = /^(interpretaci[oó]n|interpretation)\s*:\s*/i;
+  let summaryMain = segments.shift() || '';
+  let summaryInterpretation = '';
+
+  const summaryInterpretationMatch = summaryMain.match(
+    /(.*?)(?:\s*[—-]\s*)?(interpretaci[oó]n|interpretation)\s*:\s*(.+)$/i
+  );
+  if (summaryInterpretationMatch) {
+    summaryMain = summaryInterpretationMatch[1]?.trim() || summaryMain;
+    summaryInterpretation = summaryInterpretationMatch[3]?.trim() || '';
+  }
+
+  const items = [];
+  segments.forEach((segment) => {
+    if (interpretationRe.test(segment) && !summaryInterpretation) {
+      summaryInterpretation = segment.replace(interpretationRe, '').trim();
+      return;
+    }
+    items.push(segment);
+  });
+
+  if (!summaryMain && items.length) {
+    summaryMain = items.shift() || '';
+  }
+
+  return {
+    summaryMain,
+    summaryInterpretation,
+    items
+  };
+}
+
+function renderMetricDetail(detail) {
+  const parsed = parseMetricDetail(detail);
+  if (!parsed) return '';
+
+  const hasStructuredDetail = parsed.items.length > 0 || parsed.summaryInterpretation;
+  if (!hasStructuredDetail) {
+    return `<div class="metric-detail">${localizeDynamicText(parsed.summaryMain)}</div>`;
+  }
+
+  const summaryMain = localizeDynamicText(parsed.summaryMain);
+  const summaryInterpretation = parsed.summaryInterpretation
+    ? `<span class="md-interpret">${localizeDynamicText(parsed.summaryInterpretation)}</span>`
+    : '';
+  const listItems = parsed.items
+    .map((item) => {
+      const idx = item.indexOf(':');
+      if (idx <= 0) return `<li>${localizeDynamicText(item)}</li>`;
+      const label = item.slice(0, idx).trim();
+      const value = item.slice(idx + 1).trim();
+      if (!value) return `<li>${localizeDynamicText(item)}</li>`;
+      return `<li><span class="md-label">${localizeDynamicText(label + ':')}</span> ${localizeDynamicText(value)}</li>`;
+    })
+    .join('');
+
+  return `<details class="metric-detail"><summary><span class="md-kpi">${summaryMain}</span>${summaryInterpretation}</summary><ul class="md-list">${listItems}</ul></details>`;
+}
+
+function splitDetailLabelValue(detailItem) {
+  const idx = String(detailItem || '').indexOf(':');
+  if (idx <= 0) return null;
+  const label = detailItem.slice(0, idx).trim();
+  const value = detailItem.slice(idx + 1).trim();
+  if (!label || !value) return null;
+  return { label, value };
+}
+
+function renderPrintableMetricDetail(item) {
+  const parsed = parseMetricDetail(item.detail || '');
+  const headline = localizeDynamicText(
+    parsed?.summaryMain || item.value || item.detail || ''
+  );
+  const bullets = [];
+
+  if (parsed?.summaryInterpretation) {
+    bullets.push({
+      label: currentLang === 'es' ? 'Interpretación:' : 'Interpretation:',
+      value: localizeDynamicText(parsed.summaryInterpretation)
+    });
+  }
+
+  (parsed?.items || []).forEach((entry) => {
+    const split = splitDetailLabelValue(entry);
+    if (split) {
+      bullets.push({
+        label: localizeDynamicText(split.label + ':'),
+        value: localizeDynamicText(split.value)
+      });
+      return;
+    }
+    bullets.push({ value: localizeDynamicText(entry) });
+  });
+
+  if (!parsed && item.detail) {
+    bullets.push({ value: localizeDynamicText(item.detail) });
+  }
+
+  if (item.explanation) {
+    bullets.push({
+      label: currentLang === 'es' ? 'Datos:' : 'Data:',
+      value: localizeDynamicText(item.explanation)
+    });
+  }
+
+  if (!bullets.length) {
+    bullets.push({
+      value: currentLang === 'es' ? 'Sin detalle adicional.' : 'No additional detail.'
+    });
+  }
+
+  const bulletHtml = bullets
+    .map((bullet) => {
+      if (!bullet.label) return `<li>${escapeHtml(bullet.value)}</li>`;
+      return `<li><strong>${escapeHtml(bullet.label)}</strong> ${escapeHtml(bullet.value)}</li>`;
+    })
+    .join('');
+
+  return {
+    headline,
+    bulletHtml
+  };
+}
+
 // =========================================================
 // PARSER — Converts TIKR markdown tables to structured data
 // =========================================================
@@ -6339,8 +6475,6 @@ function buildPrintableDashboardPanel(data, results, industrySelection = null) {
       const metrics = (section.items || [])
         .map((item) => {
           const metricName = localizeDynamicText(item.name || 'Metric');
-          const metricDetail = localizeDynamicText(item.detail || '');
-          const metricValues = localizeDynamicText(item.explanation || '');
           const signalText = localizeDynamicText(item.signalText || '');
           const signal =
             item.signal === 'bull'
@@ -6355,17 +6489,17 @@ function buildPrintableDashboardPanel(data, results, industrySelection = null) {
                   ? '🟡 Neutral'
                   : '🟡 Neutral';
           const note = localizeDynamicText(item.note || '');
-          const value = item.value != null ? ` (${item.value})` : '';
-          return `<li>
-            <strong>${escapeHtml(metricName)}</strong>${escapeHtml(value)}
-            ${metricDetail ? `<br/><span>${escapeHtml(metricDetail)}</span>` : ''}
-            ${metricValues ? `<br/><span>${escapeHtml(metricValues)}</span>` : ''}
-            <br/><span><strong>${escapeHtml(currentLang === 'es' ? 'Señal' : 'Signal')}:</strong> ${escapeHtml(signal)}${signalText ? ` · ${escapeHtml(signalText)}` : ''}</span>
-            ${note ? `<br/><span>${escapeHtml(note)}</span>` : ''}
+          const { headline, bulletHtml } = renderPrintableMetricDetail(item);
+          return `<li class="print-metric">
+            <div class="print-title">${escapeHtml(metricName)}</div>
+            ${headline ? `<div class="print-headline">${escapeHtml(headline)}</div>` : ''}
+            <ul class="print-bullets">${bulletHtml}</ul>
+            <div class="print-signal"><strong>${escapeHtml(currentLang === 'es' ? 'Señal:' : 'Signal:')}</strong> ${escapeHtml(signal)}${signalText ? ` · ${escapeHtml(signalText)}` : ''}</div>
+            ${note ? `<div class="print-note">${escapeHtml(note)}</div>` : ''}
           </li>`;
         })
         .join('');
-      return `<section><h3>${escapeHtml(sectionTitle)}</h3><ul>${metrics}</ul></section>`;
+      return `<section><h3>${escapeHtml(sectionTitle)}</h3><ul class="print-metrics">${metrics}</ul></section>`;
     })
     .join('');
 
@@ -6531,7 +6665,7 @@ export function renderDashboard(data, results, industrySelection = null) {
         <div class="a-item">
           <div>
             <div class="metric-name">${localizeDynamicText(item.name)}${item.tip ? ` <span class="tip" data-tip="${localizeDynamicText(item.tip)}">ⓘ</span>` : ''} <span class="tip" data-tip="${t('scoreConditions', 'Score conditions')}: ${localizeDynamicText(item.scoreRule || item.explanation || item.signalText || '')}">🏷️</span></div>
-            <div class="metric-detail">${localizeDynamicText(item.detail || '')}</div>
+            ${renderMetricDetail(item.detail || '')}
             ${item.explanation ? `<div class="metric-values">${localizeDynamicText(item.explanation)}</div>` : ''}
             <div class="metric-values">${t('confidence', 'Confidence')}: ${(item.confidence * 100).toFixed(0)}%</div>
             ${renderTrendBars(item.values?.fullValues || item.values, item.values?.fullLabels || item.labels || [])}
