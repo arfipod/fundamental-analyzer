@@ -335,7 +335,7 @@ const DYNAMIC_I18N = {
     'Consensus EBITDA Estimate': 'Estimación de EBITDA de consenso',
     'Consensus FCF Estimate': 'Estimación de FCF de consenso',
     'Revenue vs Earnings Harmony': 'Armonía ingresos vs beneficios',
-    'CFO vs Net Income (Accrual Risk)':
+    'CFO vs Net Income (Accrual Risk, LTM)':
       'CFO vs Beneficio neto (riesgo de devengo)',
     'FCF Consistency Check': 'Chequeo de consistencia del FCF',
     'Net Debt / Net Cash': 'Deuda neta / Caja neta',
@@ -1152,16 +1152,19 @@ function analyze(data, profile = 'default', options = {}) {
       const latestYoy = validYoy[validYoy.length - 1];
       const avgYoy = avg(validYoy);
       const sd = stddev(validYoy);
-      const consistent = sd !== null && sd < 10;
       growthItems.push(
         makeItem(
           'Revenue YoY Growth',
           `Latest YoY: ${latestYoy?.toFixed(1)}% | Avg: ${avgYoy?.toFixed(1)}%`,
           validYoy,
           latestYoy > 10 ? 'bull' : latestYoy > 3 ? 'neutral' : 'bear',
-          consistent ? 'Consistent' : 'Volatile',
+          sd !== null && sd < 5
+            ? 'Stable'
+            : sd !== null && sd < 10
+              ? 'Moderate variability'
+              : 'Volatile',
           sd !== null
-            ? `Std dev: ${sd.toFixed(1)}pp — ${consistent ? 'predictable' : 'erratic'} growth`
+            ? `Std dev: ${sd.toFixed(1)}pp — ${sd < 5 ? 'stable' : sd < 10 ? 'moderately variable' : 'erratic'} growth`
             : ''
         )
       );
@@ -1678,7 +1681,7 @@ function analyze(data, profile = 'default', options = {}) {
             : latestPct < 10
               ? 'Moderate'
               : 'Capital Intensive',
-          'High D&A = heavy fixed assets or acquisitions with amortization'
+          'Measures depreciation/amortization intensity: higher values can reflect asset-heavy operations or acquisition-related amortization.'
         )
       );
     }
@@ -2416,7 +2419,7 @@ function analyze(data, profile = 'default', options = {}) {
         interestCovRow === ebitInterestCovRow
           ? 'Interest Coverage (EBIT / Interest)'
           : interestCovRow === ffoInterestCovRow
-            ? 'Interest Coverage (FFO / Interest)'
+            ? 'Interest Coverage (Operating Cash Flow / Interest)'
             : 'Interest Coverage (EBITDA / Interest)';
       debtItems.push(
         makeItem(
@@ -2527,7 +2530,7 @@ function analyze(data, profile = 'default', options = {}) {
       if (!allMeaningful) {
         cfItems.push(
           makeItem(
-            'CFO / Net Income (Cash Conversion)',
+            'CFO / Net Income (Cash Conversion, Multi-year)',
             'Not meaningful: Net Income ≤ 0 in one or more periods',
             [],
             'neutral',
@@ -2542,7 +2545,7 @@ function analyze(data, profile = 'default', options = {}) {
         const avgRatio = avg(ratioVals);
         cfItems.push(
           makeItem(
-            'CFO / Net Income (Cash Conversion)',
+            'CFO / Net Income (Cash Conversion, Multi-year)',
             `Average: ${avgRatio?.toFixed(0)}%`,
             ratioVals,
             avgRatio > 100 ? 'bull' : avgRatio > 75 ? 'neutral' : 'bear',
@@ -2953,20 +2956,31 @@ function analyze(data, profile = 'default', options = {}) {
     const ev = getLatest(evRow);
     if (mc && ev) {
       const evPremium = (ev / mc - 1) * 100;
+      const evInvalid = ev <= 0 || ev < mc * 0.2 || !Number.isFinite(evPremium);
       valItems.push(
         makeItem(
           'Enterprise Value vs Market Cap',
           `MC: $${(mc / 1000).toFixed(1)}B | EV: $${(ev / 1000).toFixed(1)}B (${evPremium > 0 ? '+' : ''}${evPremium.toFixed(0)}%)`,
           [],
-          evPremium < 5 ? 'bull' : evPremium < 20 ? 'neutral' : 'bear',
-          evPremium < 0
-            ? 'Net Cash (EV < MC)'
+          evInvalid
+            ? 'neutral'
             : evPremium < 5
-              ? 'Minimal Debt'
+              ? 'bull'
               : evPremium < 20
-                ? 'Some Debt'
-                : 'Debt-heavy EV',
-          'EV > MC by a large margin = significant net debt'
+                ? 'neutral'
+                : 'bear',
+          evInvalid
+            ? '⚠️ Data invalid'
+            : evPremium < 0
+              ? 'Net Cash (EV < MC)'
+              : evPremium < 5
+                ? 'Minimal Debt'
+                : evPremium < 20
+                  ? 'Some Debt'
+                  : 'Debt-heavy EV',
+          evInvalid
+            ? 'EV sanity check failed (EV<=0 or EV<20% of Market Cap). Metric excluded from scoring.'
+            : 'EV > MC by a large margin = significant net debt'
         )
       );
     }
@@ -3164,19 +3178,31 @@ function analyze(data, profile = 'default', options = {}) {
     const vals = getRecentValues(divYieldRow, 6);
     const latest = vals[vals.length - 1];
     if (latest !== null && latest > 0) {
+      const divPaidLatest = Math.abs(
+        getLatest(findRowAny(cf, 'Dividendos pagados', 'Dividends Paid')) || 0
+      );
+      const divMismatch = latest > 0 && divPaidLatest === 0;
       valItems.push(
         makeItem(
           'Dividend Yield',
-          `Latest: ${latest.toFixed(2)}%`,
+          `Latest: ${latest.toFixed(2)}%${divMismatch ? ' | ⚠️ Cash dividends: $0M (source/period mismatch)' : ''}`,
           vals,
-          latest > 2 ? 'bull' : latest > 0.5 ? 'neutral' : 'neutral',
-          latest > 3
-            ? 'High Yield'
+          divMismatch
+            ? 'neutral'
             : latest > 2
-              ? 'Good Yield'
+              ? 'bull'
               : latest > 0.5
-                ? 'Modest'
-                : 'Token Dividend'
+                ? 'neutral'
+                : 'neutral',
+          divMismatch
+            ? '⚠️ Yield mismatch'
+            : latest > 3
+              ? 'High Yield'
+              : latest > 2
+                ? 'Good Yield'
+                : latest > 0.5
+                  ? 'Modest'
+                  : 'Token Dividend'
         )
       );
     }
@@ -3667,19 +3693,30 @@ function analyze(data, profile = 'default', options = {}) {
   const epsY = yoyGrowth(epsVals).slice(-1)[0];
   const earnY = niY ?? epsY;
   if (revY !== null && earnY !== null) {
+    const gap = Math.abs(earnY - revY);
+    const severeMismatch = gap > 50;
+    const mildMismatch = gap > 30;
     const bearish = revY > 4 && earnY < -4;
     harmonyItems.push(
       makeItem(
         'Revenue vs Earnings Harmony',
-        `Revenue YoY ${revY.toFixed(1)}% vs Earnings YoY ${earnY.toFixed(1)}%`,
+        `Revenue YoY ${revY.toFixed(1)}% vs Earnings YoY ${earnY.toFixed(1)}% (gap: ${gap.toFixed(1)}pp)`,
         [revY, earnY],
-        bearish ? 'bear' : revY > 0 && earnY > 0 ? 'bull' : 'neutral',
-        bearish
+        bearish || severeMismatch
+          ? 'bear'
+          : mildMismatch
+            ? 'neutral'
+            : revY > 0 && earnY > 0
+              ? 'bull'
+              : 'neutral',
+        bearish || severeMismatch
           ? 'Growth-Profit Mismatch'
-          : revY > 0 && earnY > 0
-            ? 'Aligned Growth'
-            : 'Mixed',
-        'Revenue rising while NI/EPS falls can signal weak quality growth.',
+          : mildMismatch
+            ? 'Divergent growth'
+            : revY > 0 && earnY > 0
+              ? 'Aligned Growth'
+              : 'Mixed',
+        'Large gaps between revenue and earnings growth can indicate one-offs, tax effects, or non-recurring items.',
         { tip: METRIC_TIPS.harmony }
       )
     );
@@ -3743,7 +3780,7 @@ function analyze(data, profile = 'default', options = {}) {
       const ratio = cfoL / niL;
       harmonyItems.push(
         makeItem(
-          'CFO vs Net Income (Accrual Risk)',
+          'CFO vs Net Income (Accrual Risk, LTM)',
           `CFO/NI: ${ratio.toFixed(2)}x`,
           [ratio],
           ratio < 0.75 ? 'bear' : ratio > 1 ? 'bull' : 'neutral',

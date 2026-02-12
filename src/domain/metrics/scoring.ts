@@ -1,5 +1,30 @@
 // @ts-nocheck
-let currentLang = localStorage.getItem('fundamentalAnalyzerLang') || 'es';
+const STORAGE_KEY = 'fundamentalAnalyzerLang';
+const DEFAULT_LANG = 'es';
+
+function asLang(value) {
+  return value === 'en' ? 'en' : 'es';
+}
+
+function safeGetStorage(key, fallback = null) {
+  try {
+    return localStorage.getItem(key) || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function safeSetStorage(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // No-op: storage may be unavailable in some execution contexts.
+  }
+}
+
+let currentLang = asLang(safeGetStorage(STORAGE_KEY, DEFAULT_LANG));
+const langListeners = new Set();
+
 export function getCurrentLang() {
   return currentLang;
 }
@@ -20,22 +45,34 @@ function applyLocalization() {
   document.documentElement.lang = currentLang;
   document.querySelectorAll('[data-i18n]').forEach((el) => {
     const key = el.getAttribute('data-i18n');
-    el.textContent = t(key, el.textContent);
+    if (!el.dataset.i18nDefault) el.dataset.i18nDefault = el.textContent || '';
+    el.textContent = t(key, el.dataset.i18nDefault);
   });
   document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
     const key = el.getAttribute('data-i18n-placeholder');
-    el.placeholder = t(key, el.placeholder || '');
+    if (!el.dataset.i18nPlaceholderDefault)
+      el.dataset.i18nPlaceholderDefault = el.placeholder || '';
+    el.placeholder = t(key, el.dataset.i18nPlaceholderDefault);
   });
 }
 
+function emitLangChange() {
+  for (const cb of langListeners) cb(currentLang);
+}
+
+export function onLanguageChange(cb) {
+  if (typeof cb !== 'function') return () => {};
+  langListeners.add(cb);
+  return () => langListeners.delete(cb);
+}
+
 export function setLanguage(lang) {
-  currentLang = lang === 'en' ? 'en' : 'es';
-  localStorage.setItem('fundamentalAnalyzerLang', currentLang);
+  currentLang = asLang(lang);
+  safeSetStorage(STORAGE_KEY, currentLang);
   applyLocalization();
   const langSel = document.getElementById('langSelect');
   if (langSel) langSel.value = currentLang;
-  populateIndustrySelector();
-  updateToggleSectionsButton();
+  emitLangChange();
 }
 
 const FINANCIAL_LABEL_EN_ES = {
@@ -213,6 +250,12 @@ const LABEL_NORMALIZATION_FIXES = {
   extradordinarios: 'extraordinarios'
 };
 
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const LABEL_FIX_PATTERNS = Object.entries(LABEL_NORMALIZATION_FIXES).map(
+  ([wrong, ok]) => [new RegExp(escapeRegExp(wrong), 'gi'), ok]
+);
+
 function normalizeLabelText(label) {
   if (!label) return '';
   let out = String(label)
@@ -220,16 +263,22 @@ function normalizeLabelText(label) {
     .replace(/\s+/g, ' ')
     .replace(/\s*%\s*/g, ' % ')
     .trim();
-  Object.entries(LABEL_NORMALIZATION_FIXES).forEach(([wrong, ok]) => {
-    const re = new RegExp(wrong, 'gi');
+  LABEL_FIX_PATTERNS.forEach(([re, ok]) => {
     out = out.replace(re, ok);
   });
   return out.replace(/%\s+\)/g, '%)').replace(/\s+/g, ' ').trim();
 }
 
-const FINANCIAL_LABEL_NORMALIZED = Object.fromEntries(
+const FINANCIAL_LABEL_NORMALIZED_EN = Object.fromEntries(
   Object.entries(FINANCIAL_LABEL_EN_ES).map(([en, es]) => [
     normalizeLabelText(en).toLowerCase(),
+    { en, es }
+  ])
+);
+
+const FINANCIAL_LABEL_NORMALIZED_ES = Object.fromEntries(
+  Object.entries(FINANCIAL_LABEL_EN_ES).map(([en, es]) => [
+    normalizeLabelText(es).toLowerCase(),
     { en, es }
   ])
 );
@@ -237,14 +286,25 @@ const FINANCIAL_LABEL_NORMALIZED = Object.fromEntries(
 function canonicalizeFinancialLabel(label) {
   const raw = String(label || '');
   const normalized = normalizeLabelText(raw);
-  const exact = FINANCIAL_LABEL_NORMALIZED[normalized.toLowerCase()];
-  if (exact)
+  const key = normalized.toLowerCase();
+  const exactEn = FINANCIAL_LABEL_NORMALIZED_EN[key];
+  if (exactEn)
     return {
       raw,
       normalized,
-      canonicalEn: exact.en,
-      es: exact.es,
-      match: 'exact'
+      canonicalEn: exactEn.en,
+      es: exactEn.es,
+      match: 'exact_en'
+    };
+
+  const exactEs = FINANCIAL_LABEL_NORMALIZED_ES[key];
+  if (exactEs)
+    return {
+      raw,
+      normalized,
+      canonicalEn: exactEs.en,
+      es: exactEs.es,
+      match: 'exact_es'
     };
 
   const syn = FINANCIAL_SYNONYMS[normalized.toLowerCase()];
@@ -299,6 +359,7 @@ const DYNAMIC_I18N = {
     'Operating Margin (EBIT)': 'Margen operativo (EBIT)',
     'EBITDA Margin': 'Margen EBITDA',
     'FCF Margin': 'Margen de FCF',
+    'Margin Expansion vs Gross': 'Expansión de márgenes vs bruto',
     'Operating Leverage': 'Apalancamiento operativo',
     'COGS as % of Revenue': 'COGS como % de ingresos',
     'Operating Expenses as % of Gross Profit':
@@ -342,7 +403,7 @@ const DYNAMIC_I18N = {
     'Consensus EBITDA Estimate': 'Estimación de EBITDA de consenso',
     'Consensus FCF Estimate': 'Estimación de FCF de consenso',
     'Revenue vs Earnings Harmony': 'Armonía ingresos vs beneficios',
-    'CFO vs Net Income (Accrual Risk)':
+    'CFO vs Net Income (Accrual Risk, LTM)':
       'CFO vs Beneficio neto (riesgo de devengo)',
     'FCF Consistency Check': 'Chequeo de consistencia del FCF',
     'Net Debt / Net Cash': 'Deuda neta / Caja neta',
@@ -404,6 +465,9 @@ const DYNAMIC_I18N = {
     Outstanding: 'Sobresaliente',
     'Negative CCC (Uses supplier float!)':
       'CCC negativo (usa financiación de proveedores)',
+    'Strong supplier float (supplier financing)':
+      'Fuerte supplier float (financiación de proveedores)',
+    'Low payables float': 'Float de proveedores bajo',
     'Context only': 'Solo contexto',
     'Never Cut — Reliable': 'Nunca recortado — fiable',
     'In line': 'En línea',
@@ -516,35 +580,84 @@ const DYNAMIC_I18N = {
   }
 };
 
+const FIN_LABEL_ENTRIES = Object.entries(FINANCIAL_LABEL_EN_ES).sort(
+  (a, b) => b[0].length - a[0].length
+);
+const reverseAndSortByFromLen = (entries) =>
+  entries
+    .map(([from, to]) => [to, from])
+    .sort((a, b) => b[0].length - a[0].length);
+
+const FIN_LABEL_ENTRIES_REVERSED = reverseAndSortByFromLen(FIN_LABEL_ENTRIES);
+const METRIC_ENTRIES = Object.entries(DYNAMIC_I18N.metricNames).sort(
+  (a, b) => b[0].length - a[0].length
+);
+const METRIC_ENTRIES_REVERSED = reverseAndSortByFromLen(METRIC_ENTRIES);
+const SECTION_ENTRIES = Object.entries(DYNAMIC_I18N.sectionTitles).sort(
+  (a, b) => b[0].length - a[0].length
+);
+const SECTION_ENTRIES_REVERSED = reverseAndSortByFromLen(SECTION_ENTRIES);
+const FRAG_ENTRIES = Object.entries(DYNAMIC_I18N.fragments).sort(
+  (a, b) => b[0].length - a[0].length
+);
+const FRAG_ENTRIES_REVERSED = reverseAndSortByFromLen(FRAG_ENTRIES);
+
+function compileReplacers(entries) {
+  return entries.map(([from, to]) => {
+    const hasAlphaNum = /[A-Za-z0-9]/.test(from);
+    if (!hasAlphaNum) {
+      return {
+        replace: (text) => text.replaceAll(from, to)
+      };
+    }
+    const escaped = escapeRegExp(from);
+    const re = new RegExp(
+      `(^|[^\\p{L}\\p{N}_])(${escaped})(?=$|[^\\p{L}\\p{N}_])`,
+      'gu'
+    );
+    return {
+      replace: (text) => text.replace(re, (_, lead) => `${lead}${to}`)
+    };
+  });
+}
+
+const METRIC_REPLACERS_ES = compileReplacers(METRIC_ENTRIES);
+const METRIC_REPLACERS_EN = compileReplacers(METRIC_ENTRIES_REVERSED);
+const SECTION_REPLACERS_ES = compileReplacers(SECTION_ENTRIES);
+const SECTION_REPLACERS_EN = compileReplacers(SECTION_ENTRIES_REVERSED);
+const FRAG_REPLACERS_ES = compileReplacers(FRAG_ENTRIES);
+const FRAG_REPLACERS_EN = compileReplacers(FRAG_ENTRIES_REVERSED);
+const FIN_REPLACERS_ES = compileReplacers(FIN_LABEL_ENTRIES);
+const FIN_REPLACERS_EN = compileReplacers(FIN_LABEL_ENTRIES_REVERSED);
+
 function localizeDynamicText(text) {
   if (!text) return text;
   let out = normalizeLabelText(String(text));
 
-  // Financial labels first: exact map, then synonyms, fallback to original.
-  Object.entries(FINANCIAL_LABEL_EN_ES)
-    .sort((a, b) => b[0].length - a[0].length)
-    .forEach(([en, es]) => {
-      const re = new RegExp(en.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
-      out = out.replace(re, currentLang === 'es' ? es : en);
-    });
+  const metricReplacers =
+    currentLang === 'es' ? METRIC_REPLACERS_ES : METRIC_REPLACERS_EN;
+  metricReplacers.forEach((replacer) => {
+    out = replacer.replace(out);
+  });
 
-  if (currentLang !== 'es') return out;
+  const sectionReplacers =
+    currentLang === 'es' ? SECTION_REPLACERS_ES : SECTION_REPLACERS_EN;
+  sectionReplacers.forEach((replacer) => {
+    out = replacer.replace(out);
+  });
 
-  Object.entries(DYNAMIC_I18N.metricNames)
-    .sort((a, b) => b[0].length - a[0].length)
-    .forEach(([en, es]) => {
-      out = out.replaceAll(en, es);
-    });
-  Object.entries(DYNAMIC_I18N.sectionTitles)
-    .sort((a, b) => b[0].length - a[0].length)
-    .forEach(([en, es]) => {
-      out = out.replaceAll(en, es);
-    });
-  Object.entries(DYNAMIC_I18N.fragments)
-    .sort((a, b) => b[0].length - a[0].length)
-    .forEach(([en, es]) => {
-      out = out.replaceAll(en, es);
-    });
+  const fragmentReplacers =
+    currentLang === 'es' ? FRAG_REPLACERS_ES : FRAG_REPLACERS_EN;
+  fragmentReplacers.forEach((replacer) => {
+    out = replacer.replace(out);
+  });
+
+  const financialReplacers =
+    currentLang === 'es' ? FIN_REPLACERS_ES : FIN_REPLACERS_EN;
+  financialReplacers.forEach((replacer) => {
+    out = replacer.replace(out);
+  });
+
   return out;
 }
 
@@ -552,7 +665,9 @@ function localizeDynamicText(text) {
 // PARSER — Converts TIKR markdown tables to structured data
 // =========================================================
 function parseNumber(s) {
-  if (!s || typeof s !== 'string') return null;
+  if (s === null || s === undefined) return null;
+  if (typeof s === 'number') return Number.isFinite(s) ? s : null;
+  if (typeof s !== 'string') return null;
   s = s.trim();
   if (s === '' || s === '-') return null;
   const isPct = s.includes('%');
@@ -588,6 +703,77 @@ function parseNumber(s) {
     suffix === 'B' ? 1e9 : suffix === 'M' ? 1e6 : suffix === 'K' ? 1e3 : 1;
   const finalVal = val * multiplier;
   return neg ? -finalVal : finalVal;
+}
+
+function isLTM(label) {
+  const normalized = String(label || '').toLowerCase().trim();
+  return normalized.includes('ltm') || normalized === 'ttm';
+}
+
+function isNonPeriodLabel(label) {
+  const normalized = String(label || '').toLowerCase().trim();
+  return (
+    normalized.includes('cagr') ||
+    normalized.includes('crecmiento compuesto') ||
+    normalized.includes('crecimiento compuesto') ||
+    normalized.includes('compound growth')
+  );
+}
+
+function toSeries(row, options = {}) {
+  if (!row?.values?.length) return [];
+  const excludeLTM = options.excludeLTM !== false;
+  return row.values
+    .map((v, i) => ({
+      date: row.dates?.[i] ?? String(i),
+      value: parseNumber(v)
+    }))
+    .filter(
+      (p) =>
+        p.value !== null &&
+        (!excludeLTM || !isLTM(p.date)) &&
+        !isNonPeriodLabel(p.date)
+    );
+}
+
+function alignByDate(rowA, rowB, n = 6, options = {}) {
+  const aSeries = toSeries(rowA, options);
+  const bMap = new Map(
+    toSeries(rowB, options).map((p) => [p.date, p.value])
+  );
+  return aSeries
+    .map((p) => ({ date: p.date, a: p.value, b: bMap.get(p.date) ?? null }))
+    .filter((p) => p.b !== null)
+    .slice(-n);
+}
+
+function ratioPctSeries(numerRow, denomRow, n = 6, options = {}) {
+  const pairs = alignByDate(numerRow, denomRow, n, options);
+  const series = pairs
+    .map((p) =>
+      p.b ? (Math.abs(p.a) / Math.abs(p.b)) * 100 : null
+    )
+    .filter((v) => v !== null);
+  series.labels = pairs.map((p) => p.date);
+  return { pairs, series };
+}
+
+function classifyHigher(latest, bull, neutral, labels = {}) {
+  if (latest === null || latest === undefined || Number.isNaN(latest)) {
+    return {
+      signal: 'info',
+      label: labels.info || 'Not enough data'
+    };
+  }
+  if (latest >= bull) return { signal: 'bull', label: labels.bull || 'Strong' };
+  if (latest >= neutral)
+    return { signal: 'neutral', label: labels.neutral || 'OK' };
+  return { signal: 'bear', label: labels.bear || 'Weak' };
+}
+
+function hasNonPositiveEquity(equityRow, n = 2) {
+  const recent = toSeries(equityRow).slice(-Math.max(1, n));
+  return recent.length > 0 && recent.some((p) => p.value <= 0);
 }
 
 function splitMarkdownRow(row) {
@@ -898,10 +1084,10 @@ export function parseTIKR(raw) {
   data.company = company || data.company || firstLineRaw;
 
   for (const l of lines) {
-    const pm = l.match(/Price:\s*(US\$[\d.,]+)/);
+    const pm = l.match(/Price:\s*([A-Z]{0,3}\$|US\$|CA\$|€|£|¥)?\s*([\d.,]+)/i);
     if (pm) {
-      data.price = pm[1];
-      data.priceNum = parseNumber(pm[1]);
+      data.price = `${(pm[1] || '').trim()}${pm[2]}`.trim();
+      data.priceNum = parseNumber(data.price);
     }
     const dm = l.match(/Extracted:\s*(.+)/);
     if (dm) data.extractDate = dm[1];
@@ -911,9 +1097,9 @@ export function parseTIKR(raw) {
 
   // Try to capture price from the headline if "Price:" line doesn't contain it
   if (!data.price) {
-    const p = firstLineRaw.match(/US\$\s*[\d.,]+/);
+    const p = firstLineRaw.match(/(?:[A-Z]{0,3}\$|US\$|CA\$|€|£|¥)?\s*[\d.,]+/);
     if (p) {
-      data.price = p[0].replace(/\s+/g, ''); // "US$188.29"
+      data.price = p[0].replace(/\s+/g, '');
       data.priceNum = parseNumber(p[0]);
     }
   }
@@ -986,12 +1172,22 @@ export function parseTIKR(raw) {
 // =========================================================
 // ANALYSIS ENGINE — COMPREHENSIVE HEURISTICS
 // =========================================================
-function getRecentValues(row, n = 5) {
+function getRecentValues(row, n = 5, options = {}) {
   if (!row) return [];
-  const mapped = row.values.map((v, i) => ({
-    value: parseNumber(v),
-    label: row.dates?.[i] || ''
-  }));
+  const mapped = row.values.map((v, i) => {
+    const label = row.dates?.[i] || '';
+    const value = parseNumber(v);
+    const skipNonPeriod = isNonPeriodLabel(label);
+    return {
+      value:
+        options.excludeLTM !== false && isLTM(label)
+          ? null
+          : skipNonPeriod
+            ? null
+            : value,
+      label
+    };
+  });
   const slicedAll = mapped.slice(-n);
   const slicedNumeric = slicedAll.filter((x) => x.value !== null);
   const vals = slicedNumeric.map((x) => x.value);
@@ -1001,15 +1197,89 @@ function getRecentValues(row, n = 5) {
   return vals;
 }
 
+function extractPeriodYear(label) {
+  const text = String(label || '').trim();
+  if (!text) return null;
+
+  const y4 = text.match(/(19|20)\d{2}/);
+  if (y4) return Number(y4[0]);
+
+  const y2 = text.match(/\b(\d{2})\b/);
+  if (!y2) return null;
+  const yr = Number(y2[1]);
+  if (Number.isNaN(yr)) return null;
+  return yr >= 80 ? 1900 + yr : 2000 + yr;
+}
+
+function getLatestCagrWindow(row, targetYears = 5, lookbackPoints = 12) {
+  const series = toSeries(row).slice(-lookbackPoints);
+  if (series.length < 2) return null;
+
+  const latest = series[series.length - 1];
+  const latestYear = extractPeriodYear(latest.date);
+  let startIdx = null;
+  let effectiveYears = null;
+
+  if (latestYear !== null) {
+    let bestPartial = null;
+    for (let i = series.length - 2; i >= 0; i--) {
+      const y = extractPeriodYear(series[i].date);
+      if (y === null) continue;
+      const diff = latestYear - y;
+      if (diff === targetYears) {
+        startIdx = i;
+        effectiveYears = diff;
+        break;
+      }
+      if (diff > 0 && diff < targetYears) {
+        if (bestPartial === null || diff > bestPartial.diff) {
+          bestPartial = { i, diff };
+        }
+      }
+    }
+    if (startIdx === null && bestPartial !== null) {
+      startIdx = bestPartial.i;
+      effectiveYears = bestPartial.diff;
+    }
+  }
+
+  if (startIdx === null) {
+    startIdx = Math.max(0, series.length - (targetYears + 1));
+    effectiveYears = series.length - 1 - startIdx;
+  }
+
+  if (!effectiveYears || effectiveYears <= 0) return null;
+  const start = series[startIdx];
+  const gr = cagr(start.value, latest.value, effectiveYears);
+  return {
+    growth: gr,
+    years: effectiveYears,
+    startValue: start.value,
+    endValue: latest.value
+  };
+}
+
+function computeEquityMultiplierFromBalance(assetsRow, equityRow, n = 2) {
+  const pairs = alignByDate(assetsRow, equityRow, 10)
+    .filter((p) => p.a !== null && p.b !== null && p.b !== 0)
+    .slice(-Math.max(1, n));
+
+  if (!pairs.length) return null;
+  const avgAssets = avg(pairs.map((p) => p.a));
+  const avgEquity = avg(pairs.map((p) => p.b));
+  if (avgAssets === null || avgEquity === null || avgEquity <= 0) return null;
+  return avgAssets / avgEquity;
+}
+
 function getLatest(row) {
   if (!row) return null;
-  const vals = row.values.map((v) => parseNumber(v)).filter((v) => v !== null);
+  const vals = toSeries(row).map((p) => p.value);
   return vals.length > 0 ? vals[vals.length - 1] : null;
 }
 
 function getPrevious(row) {
   if (!row) return null;
-  const vals = row.values.map((v) => parseNumber(v)).filter((v) => v !== null);
+  const vals = toSeries(row).map((p) => p.value);
   return vals.length > 1 ? vals[vals.length - 2] : null;
 }
 
@@ -1131,6 +1401,14 @@ function inferProfile(snapshot = {}) {
     financial: 0,
     default: 0
   };
+  const sectorHint = String(snapshot.sectorHint || '').toLowerCase();
+  if (sectorHint.includes('financial') || sectorHint.includes('bank'))
+    score.financial += 3;
+  if (sectorHint.includes('utility') || sectorHint.includes('electric'))
+    score.utility += 3;
+  if (sectorHint.includes('software') || sectorHint.includes('saas'))
+    score.saas += 2;
+
   if (snapshot.grossMargin !== null) {
     if (snapshot.grossMargin >= 60) score.saas += 2;
     if (snapshot.grossMargin <= 30) {
@@ -1149,12 +1427,33 @@ function inferProfile(snapshot = {}) {
   }
   if (snapshot.netDebtEbitda !== null && snapshot.netDebtEbitda > 3)
     score.utility += 1;
+
+  if (snapshot.goodwillIntangiblesToAssets !== null) {
+    if (snapshot.goodwillIntangiblesToAssets > 30) score.saas += 1;
+    if (snapshot.goodwillIntangiblesToAssets < 10) score.industrial += 1;
+  }
+  if (snapshot.rdSales !== null) {
+    if (snapshot.rdSales > 10) score.saas += 1;
+    if (snapshot.rdSales < 2) score.utility += 1;
+  }
+  if (snapshot.sbcSales !== null) {
+    if (snapshot.sbcSales > 4) score.saas += 1;
+    if (snapshot.sbcSales < 1) score.industrial += 1;
+  }
+  if (snapshot.ppeAssets !== null) {
+    if (snapshot.ppeAssets > 35) {
+      score.industrial += 1;
+      score.utility += 1;
+    }
+    if (snapshot.ppeAssets < 15) score.saas += 1;
+  }
+
   const sorted = Object.entries(score).sort((a, b) => b[1] - a[1]);
   const [winner, pts] = sorted[0] || ['default', 0];
   const secondPts = sorted[1]?.[1] || 0;
   return {
     profile: pts >= 2 && pts - secondPts >= 1 ? winner : 'default',
-    confidence: Math.min(1, pts / 4)
+    confidence: Math.min(1, pts / 6)
   };
 }
 
@@ -1185,6 +1484,24 @@ const METRIC_TIPS = {
     'Deferred revenue (ingresos diferidos): cash collected before service delivery.'
 };
 
+
+function itemScore(item) {
+  const signalScore =
+    item.signal === 'bull' ? 1 : item.signal === 'bear' ? -1 : 0;
+  return signalScore * (item.confidence ?? 0.5);
+}
+
+function sectionGrade(items) {
+  const scored = (items || []).filter((i) => i.signal !== 'info');
+  const totalW = scored.reduce((acc, i) => acc + (i.confidence ?? 0.5), 0) || 1;
+  const score = scored.reduce((acc, i) => acc + itemScore(i), 0) / totalW;
+
+  if (score >= 0.55) return 'excellent';
+  if (score >= 0.2) return 'good';
+  if (score <= -0.35) return 'poor';
+  return 'average';
+}
+
 function deriveScoreRule(name, detail, signalText, explanation) {
   const n = String(name || '').toLowerCase();
   if (n.includes('current ratio'))
@@ -1198,10 +1515,920 @@ function deriveScoreRule(name, detail, signalText, explanation) {
   if (n.includes('revenue growth (cagr)'))
     return "signal = cagr > 15 ? 'bull' : cagr > 8 ? 'neutral' : 'bear'";
   if (n.includes('roic'))
-    return "signal = latest > bull_threshold ? 'bull' : latest > neutral_threshold ? 'neutral' : 'bear'";
+    return JSON.stringify({
+      metric: 'roic',
+      bull: "metricThreshold('roic', profile, 'bull')",
+      neutral: "metricThreshold('roic', profile, 'neutral')",
+      direction: 'higher'
+    });
   if (n.includes('total equity'))
     return "signal = latest > 0 && trend==='up' ? 'bull' : latest > 0 ? 'neutral' : 'bear'";
   return explanation || detail || signalText || '';
+}
+
+function simplifyScoreRule(scoreRule = '') {
+  const rule = String(scoreRule || '').trim();
+  if (!rule) return '';
+
+  if (rule.startsWith('{') && rule.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(rule);
+      const direction = parsed.direction === 'lower' ? 'lower' : 'higher';
+      const neutralText =
+        typeof parsed.neutral === 'string' ? parsed.neutral : 'neutral threshold';
+      const bullText =
+        typeof parsed.bull === 'string' ? parsed.bull : 'bull threshold';
+      return direction === 'higher'
+        ? `higher is better; below ${neutralText} is weak, above ${bullText} is strong`
+        : `lower is better; above ${neutralText} is weak, below ${bullText} is strong`;
+    } catch {
+      return rule;
+    }
+  }
+
+  return rule
+    .replace(/\s+/g, ' ')
+    .replace(/latest/g, 'latest value')
+    .replace(/cagr/g, 'CAGR')
+    .replace(/trend===/g, 'trend = ')
+    .trim();
+}
+
+const METRIC_INTERPRETATION_LIBRARY = [
+  {
+    pattern:
+      /(revenue growth|yoy|cagr|eps growth|ebitda growth|operating income growth|net income growth|fcf growth|consensus (revenue|eps|ebitda|fcf))/i,
+    en: {
+      definition:
+        'Measures business expansion; combine absolute growth with per-share growth and volatility.',
+      lookFor:
+        'Prefer steady growth with stable/improving margins, not one-off spikes.',
+      thresholds:
+        'General guide: <5% weak, 5-10% acceptable, 10-15% good, >15% strong (context/sector dependent).',
+      pitfalls:
+        'M&A, buybacks, tax effects and base effects can overstate core growth quality.',
+      nextQuestions:
+        'How much is price vs volume vs mix? Organic vs acquired?'
+    },
+    es: {
+      definition:
+        'Mide expansión del negocio; combina crecimiento absoluto, por acción y volatilidad.',
+      lookFor:
+        'Mejor crecimiento estable con márgenes defendidos/crecientes, no picos puntuales.',
+      thresholds:
+        'Guía general: <5% débil, 5-10% aceptable, 10-15% bueno, >15% fuerte (según sector).',
+      pitfalls:
+        'M&A, recompras, impuestos y efecto base pueden inflar el crecimiento “core”.',
+      nextQuestions:
+        '¿Cuánto viene de precio, volumen o mix? ¿Orgánico vs adquirido?'
+    }
+  },
+  {
+    pattern: /(gross margin|ebit margin|operating margin|ebitda margin|fcf margin)/i,
+    en: {
+      definition:
+        'Shows pricing power and operating discipline converted into profitability.',
+      lookFor:
+        'Level + trend + stability; stable mid-level can be better than volatile high margins.',
+      thresholds:
+        'Compare with peers/history; persistent expansion is positive, sustained compression is a warning.',
+      pitfalls:
+        'Temporary cuts in R&D/marketing may boost margins now but hurt long-term moat.',
+      nextQuestions:
+        'Is margin change driven by mix, pricing, or temporary cost actions?'
+    },
+    es: {
+      definition:
+        'Refleja poder de precios y disciplina operativa convertidos en rentabilidad.',
+      lookFor:
+        'Nivel + tendencia + estabilidad; margen medio estable puede ser mejor que uno alto volátil.',
+      thresholds:
+        'Comparar con peers/historia; expansión sostenida es positiva, compresión sostenida alerta.',
+      pitfalls:
+        'Recortar I+D/marketing puede inflar margen hoy y debilitar el foso mañana.',
+      nextQuestions:
+        '¿El cambio viene de mix, pricing o recortes temporales?'
+    }
+  },
+  {
+    pattern: /(cogs|opex|sg&a|sga|stock-based|sbc)/i,
+    en: {
+      definition:
+        'Tracks cost structure quality and whether scale improves unit economics.',
+      lookFor:
+        'For most cost ratios lower is better, except R&D where too low can underinvest future growth.',
+      thresholds:
+        'Evaluate trend and peer percentile rather than one static threshold.',
+      pitfalls:
+        'Accounting policy changes (capitalized costs, classification changes) can distort comparability.',
+      nextQuestions:
+        'Are costs structurally improving or temporarily deferred/capitalized?'
+    },
+    es: {
+      definition:
+        'Mide la calidad de la estructura de costes y si la escala mejora la economía unitaria.',
+      lookFor:
+        'En la mayoría de ratios de coste, bajar es mejor; en I+D, demasiado bajo puede ser mala señal.',
+      thresholds:
+        'Usar tendencia y percentil frente a peers más que un umbral fijo.',
+      pitfalls:
+        'Cambios contables (capitalización/reclasificación) pueden distorsionar comparaciones.',
+      nextQuestions:
+        '¿Mejora estructural real o costes diferidos/capitalizados?'
+    }
+  },
+  {
+    pattern: /(roe|roa|roic|equity multiplier)/i,
+    en: {
+      definition:
+        'Measures return efficiency on shareholder capital and assets.',
+      lookFor:
+        'High returns are best when leverage is moderate and consistency is strong.',
+      thresholds:
+        'ROIC above cost of capital creates value; very high ROE with high leverage needs caution.',
+      pitfalls:
+        'Low/negative equity can mechanically inflate ROE without better economics.',
+      nextQuestions:
+        'How much return comes from true profitability vs leverage?'
+    },
+    es: {
+      definition:
+        'Mide eficiencia de retorno sobre capital del accionista y activos.',
+      lookFor:
+        'Retornos altos son mejores con apalancamiento moderado y consistencia.',
+      thresholds:
+        'ROIC por encima del coste de capital crea valor; ROE muy alto con alta deuda exige cautela.',
+      pitfalls:
+        'Equity bajo/negativo puede inflar ROE sin mejora económica real.',
+      nextQuestions:
+        '¿Cuánto del retorno viene de rentabilidad real vs apalancamiento?'
+    }
+  },
+  {
+    pattern:
+      /(cash .*assets|receivable|dso|inventory|inventory yoy|goodwill|intangibles|retained earnings|total equity|working capital|deferred revenue)/i,
+    en: {
+      definition:
+        'Describes balance-sheet composition, quality, and resilience under stress.',
+      lookFor:
+        'Receivables/inventory days should be stable; interpret negative working capital with CCC and business model.',
+      thresholds:
+        'No universal target: compare trend against peers and cycle phase.',
+      pitfalls:
+        'Negative retained earnings can come from heavy buybacks/dividends, not only historical losses.',
+      nextQuestions:
+        'Is balance strength improving, or funding growth with supplier/customer float?'
+    },
+    es: {
+      definition:
+        'Describe composición, calidad y resiliencia del balance ante estrés.',
+      lookFor:
+        'Días de cobro/inventario deberían ser estables; capital circulante negativo se interpreta con CCC.',
+      thresholds:
+        'No hay objetivo universal: comparar tendencia, peers y fase del ciclo.',
+      pitfalls:
+        'Beneficios retenidos negativos pueden venir de recompras/dividendos, no solo de pérdidas históricas.',
+      nextQuestions:
+        '¿El balance mejora o el crecimiento se financia con float de proveedores/clientes?'
+    }
+  },
+  {
+    pattern:
+      /(debt|liabilit|current ratio|quick ratio|interest coverage|ffo|net debt|net cash|cash \/ short-term debt|deleverag|leverage|capital)/i,
+    en: {
+      definition:
+        'Assesses solvency, refinancing risk, and debt-servicing capacity.',
+      lookFor:
+        'Read leverage with interest coverage, maturity profile, and cash position together.',
+      thresholds:
+        'General ranges: Net debt/EBITDA 0-2x healthy, 3-5x stressed; coverage should stay comfortably >3-5x.',
+      pitfalls:
+        'Some models (e.g., negative CCC retailers) tolerate low current ratios better than average firms.',
+      nextQuestions:
+        'Is debt rising to fund productive reinvestment or financial engineering?'
+    },
+    es: {
+      definition:
+        'Evalúa solvencia, riesgo de refinanciación y capacidad de servicio de deuda.',
+      lookFor:
+        'Leer apalancamiento junto con cobertura de intereses, vencimientos y caja.',
+      thresholds:
+        'Rangos generales: Deuda neta/EBITDA 0-2x saludable, 3-5x estresado; cobertura idealmente >3-5x.',
+      pitfalls:
+        'Algunos modelos (ej. retail con CCC negativo) soportan current ratio bajo mejor que otros.',
+      nextQuestions:
+        '¿La deuda sube para reinversión productiva o para ingeniería financiera?'
+    }
+  },
+
+  {
+    pattern:
+      /(asset turnover|receivables turnover|inventory turnover|cash conversion cycle|days sales outstanding|days payable outstanding|fixed assets turnover|working capital turnover|operating cash flow \/ current liabilities|revenue per employee|fcf \/ cfo)/i,
+    en: {
+      definition:
+        'Measures operating productivity of assets, working capital, and process efficiency.',
+      lookFor:
+        'Assess trend + peer comparison; improvements should come from utilization, not just asset shrinkage.',
+      thresholds:
+        'No single universal range; interpret by sector intensity and business model.',
+      pitfalls:
+        'Inflation, M&A perimeter changes, and outsourcing can mechanically move efficiency ratios.',
+      nextQuestions:
+        'Are efficiency gains structural, or mostly accounting/perimeter effects?'
+    },
+    es: {
+      definition:
+        'Mide productividad operativa de activos, capital circulante y procesos.',
+      lookFor:
+        'Evaluar tendencia + comparación con peers; mejoras deben venir de utilización real.',
+      thresholds:
+        'No hay un rango universal; depende de intensidad sectorial y modelo de negocio.',
+      pitfalls:
+        'Inflación, cambios de perímetro (M&A) y outsourcing pueden mover ratios mecánicamente.',
+      nextQuestions:
+        '¿La mejora de eficiencia es estructural o efecto contable/perímetro?'
+    }
+  },
+  {
+    pattern:
+      /(cash from operations|cfo|cash conversion|capex|^free cash flow$|fcf uses summary|sbc as % of fcf|sbc as % of net income|net change in cash)/i,
+    en: {
+      definition:
+        'Measures cash quality and operating efficiency beyond accounting earnings.',
+      lookFor:
+        'Best signals are consistent CFO/FCF aligned with revenue and EBIT trends.',
+      thresholds:
+        'CFO/NI above ~1 over time is usually healthy; interpret Capex/CFO by industry intensity.',
+      pitfalls:
+        'Working-capital swings can temporarily inflate or depress FCF.',
+      nextQuestions:
+        'Is cash generation recurring, or mostly timing effects from receivables/payables/inventory?'
+    },
+    es: {
+      definition:
+        'Mide calidad de caja y eficiencia operativa más allá del beneficio contable.',
+      lookFor:
+        'La mejor señal es CFO/FCF consistente y alineado con ingresos y EBIT.',
+      thresholds:
+        'CFO/NI >~1 en el tiempo suele ser saludable; Capex/CFO depende de intensidad del sector.',
+      pitfalls:
+        'El capital circulante puede inflar o deprimir el FCF de forma temporal.',
+      nextQuestions:
+        '¿La generación de caja es recurrente o efecto timing de cobros/pagos/inventario?'
+    }
+  },
+  {
+    pattern:
+      /(ev|market cap|p\/e|price\/sales|price\/book|ev\/ebitda|ev\/ebit|ncav|yield|dividend yield|valuation|multiple|free cash flow \(ntm\)|levered fcf)/i,
+    en: {
+      definition:
+        'Prices the business versus earnings, cash flow, assets, or sales.',
+      lookFor:
+        'Use valuation with growth durability, margins, and balance-sheet risk—not in isolation.',
+      thresholds:
+        'Ranges are regime- and sector-dependent; compare to own history and close peers.',
+      pitfalls:
+        'If EV/market cap are zero/contradictory, treat as data mapping issue and validate inputs.',
+      nextQuestions:
+        'What growth and margin assumptions are implied by today\'s multiple?'
+    },
+    es: {
+      definition:
+        'Valora el negocio frente a beneficios, caja, activos o ventas.',
+      lookFor:
+        'Usar valoración junto con durabilidad del crecimiento, márgenes y riesgo de balance.',
+      thresholds:
+        'Los rangos dependen del sector/régimen; comparar con su historia y peers cercanos.',
+      pitfalls:
+        'Si EV/market cap salen en cero o contradictorios, tratarlo como posible bug de datos.',
+      nextQuestions:
+        '¿Qué supuestos de crecimiento y margen está descontando el múltiplo actual?'
+    }
+  },
+  {
+    pattern:
+      /(dividend|payout|buyback|shares outstanding|total shareholder return|shareholder return|tsr|capital return)/i,
+    en: {
+      definition:
+        'Tracks how cash is returned to shareholders and whether return policy is sustainable.',
+      lookFor:
+        'Prefer returns funded by recurring FCF, not debt spikes.',
+      thresholds:
+        'Very high payout (>~80%) can reduce resilience unless cash flow is ultra-stable.',
+      pitfalls:
+        'Buybacks create value only if done at sensible prices and not offset by high SBC dilution.',
+      nextQuestions:
+        'Is per-share value compounding after netting SBC and debt-funded buybacks?'
+    },
+    es: {
+      definition:
+        'Mide cómo se devuelve caja al accionista y si esa política es sostenible.',
+      lookFor:
+        'Mejor retornos financiados con FCF recurrente, no con picos de deuda.',
+      thresholds:
+        'Payout muy alto (>~80%) reduce resiliencia salvo caja extremadamente estable.',
+      pitfalls:
+        'Recompras crean valor solo si se hacen a precios razonables y sin dilución neta por SBC.',
+      nextQuestions:
+        '¿Compone el valor por acción tras ajustar SBC y recompras financiadas con deuda?'
+    }
+  },
+  {
+    pattern: /(harmony|accrual|consistency|red flag|sanity|reality check)/i,
+    en: {
+      definition:
+        'Cross-check layer: verifies whether growth, earnings, and cash tell the same story.',
+      lookFor:
+        'Prefer aligned trends across revenue, EBIT/NI, and CFO/FCF.',
+      thresholds:
+        'No hard threshold; repeated divergences require deeper forensic review.',
+      pitfalls:
+        'One-year mismatches can be normal, but persistent gaps often signal quality risk.',
+      nextQuestions:
+        'What single assumption would reconcile accounting profit with cash outcomes?'
+    },
+    es: {
+      definition:
+        'Capa de contraste: verifica si crecimiento, beneficios y caja cuentan la misma historia.',
+      lookFor:
+        'Preferible ver tendencias alineadas en ingresos, EBIT/NI y CFO/FCF.',
+      thresholds:
+        'Sin umbral fijo; divergencias repetidas requieren análisis forense.',
+      pitfalls:
+        'Un año aislado puede ser normal, pero brechas persistentes elevan riesgo de calidad.',
+      nextQuestions:
+        '¿Qué supuesto reconcilia mejor el beneficio contable con la caja real?'
+    }
+  }
+];
+
+
+
+const METRIC_INTERPRETATION_EXACT = {
+  'margin expansion vs gross': {
+    en: {
+      definition:
+        'Compares gross-margin change versus operating-margin change to see if overhead amplifies or offsets gross improvements.',
+      lookFor:
+        'Healthy pattern: operating margin expands at least as much as gross margin over time.',
+      thresholds:
+        'No fixed threshold; assess sign and persistence of gross Δ vs operating Δ across cycles.',
+      pitfalls:
+        'Short-term cost cuts or accounting reclassifications can temporarily inflate operating margin expansion.',
+      nextQuestions:
+        'Is the operating-margin move structural (efficiency/scale) or temporary (cuts/timing)?'
+    },
+    es: {
+      definition:
+        'Compara el cambio del margen bruto frente al cambio del margen operativo para ver si el overhead amplifica o absorbe la mejora bruta.',
+      lookFor:
+        'Patrón sano: el margen operativo se expande al menos tanto como el margen bruto.',
+      thresholds:
+        'Sin umbral fijo; importa el signo y la persistencia de Δ bruto vs Δ operativo en el ciclo.',
+      pitfalls:
+        'Recortes temporales o reclasificaciones contables pueden inflar artificialmente la expansión operativa.',
+      nextQuestions:
+        '¿El cambio de margen operativo es estructural (eficiencia/escala) o temporal (recortes/timing)?'
+    }
+  },
+  'operating leverage': {
+    en: {
+      definition:
+        'Proxy check of operating leverage using gross-margin delta vs operating-margin delta (margin expansion/compression lens).',
+      lookFor:
+        'Healthy pattern: operating margin expands at least as much as gross margin over time.',
+      thresholds:
+        'No fixed threshold; assess sign and persistence of gross Δ vs operating Δ across cycles.',
+      pitfalls:
+        'This is a margin-based proxy, not pure Δ%EBIT/Δ%Sales operating leverage.',
+      nextQuestions:
+        'Do margin changes reflect structural efficiency or temporary cost actions?'
+    },
+    es: {
+      definition:
+        'Chequeo proxy de apalancamiento operativo usando Δ margen bruto vs Δ margen operativo (lente de expansión/compresión de márgenes).',
+      lookFor:
+        'Patrón sano: el margen operativo se expande al menos tanto como el margen bruto.',
+      thresholds:
+        'Sin umbral fijo; importa el signo y la persistencia de Δ bruto vs Δ operativo.',
+      pitfalls:
+        'Es una aproximación por márgenes, no el apalancamiento puro Δ%EBIT/Δ%Ventas.',
+      nextQuestions:
+        '¿Los cambios de margen vienen de eficiencia estructural o de recortes temporales?'
+    }
+  },
+  'revenue growth (cagr)': {
+    en: {
+      definition: 'Annualized revenue growth over the effective window (smoothed path, not volatility).',
+      lookFor: 'Read together with margin durability and source of growth quality.',
+      thresholds: 'Contextual by sector/maturity; consistency usually matters more than one peak year.',
+      pitfalls: 'M&A and base effects can distort comparability across windows.',
+      nextQuestions: 'How much of growth is organic versus acquired?'
+    },
+    es: {
+      definition: 'Crecimiento anualizado de ingresos en la ventana efectiva (trayectoria suavizada, no volatilidad).',
+      lookFor: 'Leer junto con durabilidad de márgenes y calidad de la fuente de crecimiento.',
+      thresholds: 'Depende de sector/madurez; la consistencia suele importar más que un pico aislado.',
+      pitfalls: 'M&A y efectos base pueden distorsionar comparabilidad entre ventanas.',
+      nextQuestions: '¿Qué parte del crecimiento es orgánica versus adquirida?'
+    }
+  },
+  'revenue yoy growth': {
+    en: {
+      definition: 'Single-period year-over-year revenue growth, useful for momentum and cyclicality.',
+      lookFor: 'Compare latest YoY with multi-year average and dispersion (σ).',
+      thresholds: 'No universal threshold; stability and trend shape matter.',
+      pitfalls: 'One-year shocks can overstate momentum.',
+      nextQuestions: 'Is current YoY supported by demand and repeatable drivers?'
+    },
+    es: {
+      definition: 'Crecimiento interanual de ingresos de un periodo, útil para momentum y ciclicidad.',
+      lookFor: 'Comparar YoY actual con media multianual y dispersión (σ).',
+      thresholds: 'Sin umbral universal; importan estabilidad y forma de tendencia.',
+      pitfalls: 'Shocks de un año pueden exagerar el momentum.',
+      nextQuestions: '¿El YoY actual está respaldado por demanda y drivers repetibles?'
+    }
+  },
+  'eps growth (diluted)': {
+    en: {
+      definition: 'Tracks per-share earnings compounding after share-count effects.',
+      lookFor: 'Contrast EPS growth versus net income growth and dilution/buyback trends.',
+      thresholds: 'Sustained real growth is preferable to one-off tax/accounting jumps.',
+      pitfalls: 'Buybacks, tax changes, and SBC can move EPS without equivalent operating improvement.',
+      nextQuestions: 'How much EPS growth comes from operations vs capital-allocation effects?'
+    },
+    es: {
+      definition: 'Mide el crecimiento del beneficio por acción tras efectos de recuento de acciones.',
+      lookFor: 'Contrastar crecimiento de BPA con beneficio neto y tendencia de dilución/recompras.',
+      thresholds: 'Mejor crecimiento sostenido real que saltos puntuales fiscales/contables.',
+      pitfalls: 'Recompras, impuestos y SBC pueden mover BPA sin mejora operativa equivalente.',
+      nextQuestions: '¿Qué parte del BPA viene de operación vs asignación de capital?'
+    }
+  },
+  'stock-based comp as % of revenue': {
+    en: {
+      definition: 'Measures equity-based compensation intensity versus revenue and dilution pressure.',
+      lookFor: 'Track alongside diluted shares and net buyback effectiveness.',
+      thresholds: 'Lower/stable is usually healthier for per-share value creation.',
+      pitfalls: 'Treating SBC as “non-cash” can overstate underlying profitability quality.',
+      nextQuestions: 'Are buybacks offsetting SBC dilution on a net basis?'
+    },
+    es: {
+      definition: 'Mide la intensidad de compensación en acciones sobre ingresos y la presión de dilución.',
+      lookFor: 'Seguir junto con acciones diluidas y efectividad neta de recompras.',
+      thresholds: 'Más bajo/estable suele ser más sano para crear valor por acción.',
+      pitfalls: 'Tratar SBC como “no caja” puede sobreestimar la calidad del beneficio subyacente.',
+      nextQuestions: '¿Las recompras compensan la dilución por SBC en términos netos?'
+    }
+  },
+  'revenue vs earnings harmony': {
+    en: {
+      definition: 'Checks whether sales growth and earnings growth move coherently.',
+      lookFor: 'Persistent divergence may indicate margin pressure, mix shifts, or one-offs.',
+      thresholds: 'No hard threshold; repeated spread and direction conflicts are key.',
+      pitfalls: 'A single year mismatch can be normal in cyclical or transition periods.',
+      nextQuestions: 'What explains the revenue-earnings gap: margins, mix, tax, or accounting items?'
+    },
+    es: {
+      definition: 'Comprueba si el crecimiento de ventas y de beneficios se mueve de forma coherente.',
+      lookFor: 'Divergencias persistentes pueden señalar presión de márgenes, cambios de mix o one-offs.',
+      thresholds: 'Sin umbral fijo; importan las brechas repetidas y conflictos de dirección.',
+      pitfalls: 'Un año con desajuste puede ser normal en ciclos/transiciones.',
+      nextQuestions: '¿Qué explica la brecha ventas-beneficios: márgenes, mix, fiscalidad o contabilidad?'
+    }
+  },
+  'cfo vs net income (accrual risk)': {
+    en: {
+      definition: 'Assesses whether accounting earnings are backed by operating cash generation.',
+      lookFor: 'Ratios near/above 1x over time usually indicate stronger earnings quality.',
+      thresholds: 'Sustained sub-1x conversion deserves scrutiny.',
+      pitfalls: 'Working-capital timing can temporarily distort one period.',
+      nextQuestions: 'Is weak conversion structural or timing-driven?'
+    },
+    es: {
+      definition: 'Evalúa si el beneficio contable está respaldado por generación de caja operativa.',
+      lookFor: 'Ratios cercanos/superiores a 1x en el tiempo suelen implicar mejor calidad de beneficios.',
+      thresholds: 'Conversión sostenida por debajo de 1x merece revisión.',
+      pitfalls: 'El timing de capital circulante puede distorsionar un periodo aislado.',
+      nextQuestions: '¿La conversión débil es estructural o de timing?'
+    }
+  },
+  'fcf consistency check': {
+    en: {
+      definition: 'Checks whether free cash flow trend confirms revenue and earnings trends.',
+      lookFor: 'Prefer cash trend that follows or validates accounting performance.',
+      thresholds: 'Repeated “profits up / FCF flat-down” patterns are warning signals.',
+      pitfalls: 'Capex cycles can create temporary divergence.',
+      nextQuestions: 'Is divergence due to reinvestment cycle or weaker cash conversion quality?'
+    },
+    es: {
+      definition: 'Comprueba si la tendencia del FCF confirma la tendencia de ingresos y beneficios.',
+      lookFor: 'Preferible que la caja acompañe/valide el desempeño contable.',
+      thresholds: 'Patrones repetidos de “beneficios al alza / FCF plano-bajista” son alerta.',
+      pitfalls: 'Ciclos de capex pueden crear divergencias temporales.',
+      nextQuestions: '¿La divergencia es ciclo de reinversión o menor calidad de conversión a caja?'
+    }
+  },
+  'cash / assets': {
+    en: {
+      definition: 'Cash and near-cash buffer as a share of assets; indicates liquidity resilience and optionality.',
+      lookFor: 'Evaluate buffer size, trend, and whether liquidity supports capex, M&A, debt service, and buybacks.',
+      thresholds: 'Contextual by model and cyclicality; very low buffers increase shock sensitivity.',
+      pitfalls: 'Not all cash is equally available (restricted, trapped, or operational minimum cash).',
+      nextQuestions: 'How much of reported cash is truly deployable under stress?'
+    },
+    es: {
+      definition: 'Colchón de caja y cuasi-caja sobre activos; indica resiliencia de liquidez y opcionalidad.',
+      lookFor: 'Evaluar tamaño, tendencia y si soporta capex, M&A, servicio de deuda y recompras.',
+      thresholds: 'Depende de modelo y ciclicidad; buffers muy bajos elevan sensibilidad a shocks.',
+      pitfalls: 'No toda la caja es igual de disponible (restringida, atrapada o mínima operativa).',
+      nextQuestions: '¿Qué parte de la caja reportada es realmente desplegable en estrés?'
+    }
+  },
+  'forward p/e (ntm)': {
+    en: {
+      definition: 'Values next-twelve-month expected earnings; embeds growth, margin, and risk expectations.',
+      lookFor: 'Interpret with earnings quality and estimate reliability, not as a standalone buy/sell signal.',
+      thresholds: 'Relative context matters: own history, peers, and rates regime.',
+      pitfalls: 'Forward EPS can be revised quickly, making optically cheap/expensive levels unstable.',
+      nextQuestions: 'What EPS revision path is implied at the current multiple?'
+    },
+    es: {
+      definition: 'Valora beneficios esperados a 12 meses; incorpora expectativas de crecimiento, márgenes y riesgo.',
+      lookFor: 'Interpretar con calidad de beneficios y fiabilidad de estimaciones, no de forma aislada.',
+      thresholds: 'Importa el contexto relativo: historia propia, peers y régimen de tipos.',
+      pitfalls: 'El EPS forward puede revisarse rápido; lo “barato/caro” puede cambiar pronto.',
+      nextQuestions: '¿Qué trayectoria de revisiones de EPS exige el múltiplo actual?'
+    }
+  },
+  'price / sales': {
+    en: {
+      definition: 'Values each unit of revenue; useful when margins are cyclical or earnings are noisy.',
+      lookFor: 'Read with gross/operating margin structure and conversion to free cash flow.',
+      thresholds: 'Higher P/S is more justified with durable margins and strong cash conversion.',
+      pitfalls: 'Revenue growth without margin quality can make P/S look cheaper than economics justify.',
+      nextQuestions: "What normalized margin and FCF conversion are implied by today's P/S?"
+    },
+    es: {
+      definition: 'Valora cada unidad de ingresos; útil cuando márgenes son cíclicos o beneficios ruidosos.',
+      lookFor: 'Leer junto con estructura de márgenes y conversión a FCF.',
+      thresholds: 'Un P/S alto se justifica más con márgenes duraderos y fuerte conversión a caja.',
+      pitfalls: 'Crecimiento de ingresos sin calidad de margen puede hacer parecer el P/S más barato de lo real.',
+      nextQuestions: '¿Qué margen normalizado y conversión a FCF descuenta el P/S actual?'
+    }
+  },
+  'price / book value': {
+    en: {
+      definition: 'Values equity relative to accounting book value.',
+      lookFor: 'Most useful with asset-heavy/financial models and when book value quality is high.',
+      thresholds: 'Interpret with return on equity and capital intensity.',
+      pitfalls: 'For intangibles-heavy firms, book value may understate economic moat assets.',
+      nextQuestions: 'Is high P/B explained by sustainably high ROE or by accounting distortions?'
+    },
+    es: {
+      definition: 'Valora el patrimonio frente al valor contable.',
+      lookFor: 'Más útil en modelos intensivos en activos/financieros y con buena calidad contable del book.',
+      thresholds: 'Interpretar junto con ROE e intensidad de capital.',
+      pitfalls: 'En compañías intensivas en intangibles, el valor contable puede infrarrepresentar activos económicos.',
+      nextQuestions: '¿Un P/B alto se explica por ROE sostenible o por distorsiones contables?'
+    }
+  },
+  'ev / ebitda (ntm)': {
+    en: {
+      definition: 'Enterprise-value multiple over expected EBITDA, capital-structure neutral at headline level.',
+      lookFor: 'Use with reinvestment needs (capex) and cash conversion to avoid EBITDA-only bias.',
+      thresholds: 'Contextual vs peers/history and rates regime.',
+      pitfalls: 'Ignores capex intensity and working-capital demands; two firms with same EV/EBITDA can differ greatly in FCF.',
+      nextQuestions: 'How much EBITDA converts to owner cash after reinvestment?'
+    },
+    es: {
+      definition: 'Múltiplo de valor de empresa sobre EBITDA esperado, neutral a estructura de capital en titular.',
+      lookFor: 'Usarlo con necesidades de reinversión (capex) y conversión a caja para evitar sesgo EBITDA-only.',
+      thresholds: 'Contextual vs peers/historia y régimen de tipos.',
+      pitfalls: 'Ignora intensidad de capex y capital circulante; mismo EV/EBITDA puede implicar FCF muy distinto.',
+      nextQuestions: '¿Cuánto EBITDA se convierte en caja para el accionista tras reinversión?'
+    }
+  },
+  'ev / ebit (ntm)': {
+    en: {
+      definition: 'Enterprise-value multiple over expected operating profit after depreciation.',
+      lookFor: 'More informative than EV/EBITDA when depreciation tracks real asset consumption.',
+      thresholds: 'Interpret relatively, not as absolute good/bad levels.',
+      pitfalls: 'Accounting depreciation may still differ from true maintenance capex.',
+      nextQuestions: 'Is EBIT a good proxy for sustainable operating earning power here?'
+    },
+    es: {
+      definition: 'Múltiplo de valor de empresa sobre beneficio operativo esperado tras depreciación.',
+      lookFor: 'Más informativo que EV/EBITDA cuando la depreciación refleja consumo real de activos.',
+      thresholds: 'Interpretación relativa, no umbrales absolutos rígidos.',
+      pitfalls: 'La depreciación contable puede diferir del capex de mantenimiento real.',
+      nextQuestions: '¿El EBIT aproxima bien el poder de beneficio operativo sostenible?'
+    }
+  },
+  'total shareholder yield': {
+    en: {
+      definition: 'Dividends plus net buybacks relative to market cap; a direct shareholder cash-return lens.',
+      lookFor: 'Prefer sustainable yields funded by recurring FCF and stable balance sheet.',
+      thresholds: 'Very high yields can be attractive but require unit/scope sanity checks.',
+      pitfalls: 'Scaling/unit mismatches can produce impossible yields; avoid scoring until validated.',
+      nextQuestions: 'Is net shareholder yield still strong after SBC dilution and debt effects?'
+    },
+    es: {
+      definition: 'Dividendos más recompras netas sobre market cap; visión directa del retorno de caja al accionista.',
+      lookFor: 'Preferir yields sostenibles financiados por FCF recurrente y balance estable.',
+      thresholds: 'Yields muy altos pueden ser atractivos pero exigen chequeo de unidades/escala.',
+      pitfalls: 'Errores de escala/unidades pueden generar yields imposibles; no puntuar hasta validar.',
+      nextQuestions: '¿El yield al accionista sigue fuerte tras dilución por SBC y efectos de deuda?'
+    }
+  },
+  'sg&a as % of revenue': {
+    en: {
+      definition: 'Measures sales/admin overhead efficiency relative to revenue.',
+      lookFor:
+        'Prefer stable/declining trend with scale, without damaging growth quality.',
+      thresholds:
+        'Compare trend and peer percentile; avoid single hard thresholds.',
+      pitfalls:
+        'Accounting reclassifications or cost capitalization can artificially improve the ratio.',
+      nextQuestions:
+        'Is lower SG&A genuine efficiency or accounting presentation?'
+    },
+    es: {
+      definition: 'Mide la eficiencia del overhead comercial/administrativo sobre ingresos.',
+      lookFor:
+        'Ideal: tendencia estable o a la baja con escala, sin romper crecimiento.',
+      thresholds:
+        'Comparar tendencia y percentil frente a peers; evitar umbral único rígido.',
+      pitfalls:
+        'Reclasificaciones contables o capitalización de costes pueden “mejorar” el ratio artificialmente.',
+      nextQuestions:
+        '¿La mejora de SG&A es eficiencia real o presentación contable?'
+    }
+  },
+  'effective tax rate': {
+    en: {
+      definition: 'Taxes paid over pre-tax income; proxy for tax efficiency and sustainability.',
+      lookFor:
+        'Focus on level + volatility and identify one-offs (credits, repatriation, jurisdiction changes).',
+      thresholds:
+        'Benchmark versus statutory tax rate and peers; high volatility is usually event-driven.',
+      pitfalls:
+        'One-off tax items can overstate/understate underlying profitability quality.',
+      nextQuestions:
+        'Is the current effective rate structural or a one-year event?'
+    },
+    es: {
+      definition: 'Impuestos pagados sobre beneficio antes de impuestos; proxy de eficiencia fiscal.',
+      lookFor:
+        'Mirar nivel + estabilidad (σ) y detectar one-offs (créditos, repatriaciones, cambios de jurisdicción).',
+      thresholds:
+        'Comparar con tasa estatutaria y peers; volatilidad alta suele ser evento puntual.',
+      pitfalls:
+        'Partidas fiscales extraordinarias pueden distorsionar la calidad real del beneficio.',
+      nextQuestions:
+        '¿La tasa efectiva actual es sostenible o puntual?'
+    }
+  },
+  'interest expense as % of revenue': {
+    en: {
+      definition: 'Financial burden relative to business size.',
+      lookFor:
+        'Read alongside net debt, interest coverage, and debt maturity wall.',
+      thresholds:
+        'Lower is better in general, but level must be interpreted with capital structure.',
+      pitfalls:
+        'Fixed vs floating debt mix can change sensitivity quickly when rates move.',
+      nextQuestions:
+        'Are interest costs structurally manageable under stress scenarios?'
+    },
+    es: {
+      definition: 'Carga financiera relativa al tamaño del negocio.',
+      lookFor:
+        'Leer junto con deuda neta, cobertura de intereses y vencimientos.',
+      thresholds:
+        'En general más bajo es mejor, pero depende de la estructura de capital.',
+      pitfalls:
+        'La mezcla tipo fijo/variable cambia rápido la sensibilidad a tipos.',
+      nextQuestions:
+        '¿Los intereses son manejables también en escenarios de estrés?'
+    }
+  },
+  'days payable outstanding (dpo)': {
+    en: {
+      definition: 'Average days the company takes to pay suppliers (supplier float).',
+      lookFor:
+        'Higher DPO can support cash, but should remain sustainable within supplier relationships.',
+      thresholds:
+        'Interpret versus peers and business model; very low/high can both be suboptimal.',
+      pitfalls:
+        'Rising DPO can reflect bargaining power or cash stress—context matters.',
+      nextQuestions:
+        'Is DPO strength operationally sustainable without supply-chain friction?'
+    },
+    es: {
+      definition: 'Días promedio para pagar a proveedores (supplier float).',
+      lookFor:
+        'Un DPO alto mejora caja, pero debe ser sostenible sin tensionar proveedores.',
+      thresholds:
+        'Interpretar contra peers y modelo de negocio; extremos pueden ser subóptimos.',
+      pitfalls:
+        'Un DPO al alza puede ser poder de negociación o estrés de caja.',
+      nextQuestions:
+        '¿El DPO alto es sostenible sin fricción en la cadena de suministro?'
+    }
+  }
+
+  ,
+  'r&d as % of revenue': {
+    en: {
+      definition: 'R&D intensity shows innovation investment relative to revenue.',
+      lookFor:
+        'Track trend, peer comparison, and whether spending translates into product strength and durable margins.',
+      thresholds:
+        'No universal threshold; high-tech/healthcare structurally require higher R&D than mature sectors.',
+      pitfalls:
+        'Very low R&D can erode moat; very high R&D without monetization can pressure returns.',
+      nextQuestions:
+        'Is R&D spend creating durable revenue and margin outcomes?'
+    },
+    es: {
+      definition: 'I+D sobre ingresos mide la intensidad de inversión en innovación.',
+      lookFor:
+        'Seguir tendencia, comparación con peers y si se traduce en producto/foso y márgenes sostenibles.',
+      thresholds:
+        'No hay umbral universal; tech/salud suelen requerir más I+D que sectores maduros.',
+      pitfalls:
+        'I+D muy baja puede erosionar el foso; muy alta sin retorno puede presionar rentabilidad.',
+      nextQuestions:
+        '¿El gasto en I+D se está convirtiendo en ingresos/márgenes duraderos?'
+    }
+  },
+  'operating expenses as % of gross profit': {
+    en: {
+      definition: 'Measures how much gross profit is consumed by operating structure costs.',
+      lookFor:
+        'Generally lower is better if growth quality is preserved.',
+      thresholds:
+        'Trend and peer context matter; sustained rises usually reduce operating resilience.',
+      pitfalls:
+        'Planned growth investment can lift ratio temporarily; verify payback quality.',
+      nextQuestions:
+        'Is higher OpEx intensity temporary investment or structural inefficiency?'
+    },
+    es: {
+      definition: 'Mide cuánto beneficio bruto consume la estructura de gastos operativos.',
+      lookFor:
+        'En general, más bajo es mejor si no compromete el crecimiento/foso.',
+      thresholds:
+        'Importa tendencia + peers; subidas sostenidas suelen reducir resiliencia operativa.',
+      pitfalls:
+        'Fases de inversión deliberada pueden elevar el ratio temporalmente; validar payback.',
+      nextQuestions:
+        '¿El mayor OpEx es inversión temporal o ineficiencia estructural?'
+    }
+  }
+
+} as const;
+
+function metricLibraryEntry(name = '') {
+  const label = String(name || '').trim();
+  const exact = METRIC_INTERPRETATION_EXACT[label.toLowerCase() as keyof typeof METRIC_INTERPRETATION_EXACT];
+  if (exact) return exact;
+  return (
+    METRIC_INTERPRETATION_LIBRARY.find((entry) => entry.pattern.test(label)) ||
+    null
+  );
+}
+
+function buildMetricInterpretation(
+  name,
+  scoreRule,
+  signal,
+  signalText,
+  detailText = '',
+  explanationText = ''
+) {
+  const shortRule = simplifyScoreRule(scoreRule);
+  const combinedContext = `${detailText} ${explanationText} ${signalText}`.toLowerCase();
+  const sanityHint =
+    currentLang === 'es'
+      ? 'Chequeo de consistencia: si ves EV/Market Cap = 0, TSR extremo o métricas contradictorias (p.ej. net cash y net debt positivos a la vez), revisar extracción/unidades.'
+      : 'Consistency check: if EV/Market Cap = 0, TSR is extreme, or metrics conflict (e.g., net cash and positive net debt simultaneously), review extraction/units.';
+
+  const positiveBias =
+    signal === 'bull'
+      ? currentLang === 'es'
+        ? 'Lectura actual favorable.'
+        : 'Current read is favorable.'
+      : signal === 'bear'
+        ? currentLang === 'es'
+          ? 'Lectura actual débil; vigilar deterioro.'
+          : 'Current read is weak; monitor deterioration.'
+        : currentLang === 'es'
+          ? 'Lectura mixta/neutral en este momento.'
+          : 'Current read is mixed/neutral.';
+
+  const entry = metricLibraryEntry(name);
+  const pack = entry ? (currentLang === 'es' ? entry.es : entry.en) : null;
+
+  const fallbackDirection =
+    signalText &&
+    /(deleverag|deuda|cost|expense|days|dilution|accrual|tax|liquidity low|tight)/i.test(
+      signalText
+    )
+      ? currentLang === 'es'
+        ? 'Suele ser mejor que baje o se mantenga controlada.'
+        : 'Usually better when it declines or stays controlled.'
+      : currentLang === 'es'
+        ? 'Suele ser mejor que suba de forma sostenible y estable.'
+        : 'Usually better when it rises sustainably and steadily.';
+
+  const specialHints = [];
+  const metricName = String(name || '').toLowerCase();
+
+  if (metricName.includes('retained earnings')) {
+    specialHints.push(
+      currentLang === 'es'
+        ? 'Caso especial: beneficios retenidos negativos no siempre implican pérdidas históricas; también pueden reflejar recompras/dividendos acumulados.'
+        : 'Special case: negative retained earnings do not always imply historical losses; they can also reflect cumulative buybacks/dividends.'
+    );
+  }
+
+  if (metricName.includes('working capital turnover') && /latest:\s*-/.test(combinedContext)) {
+    specialHints.push(
+      currentLang === 'es'
+        ? 'Caso especial: working capital turnover negativo debe leerse junto con CCC; puede indicar fortaleza por financiación de proveedores (float).'
+        : 'Special case: negative working-capital turnover should be read with CCC; it can indicate supplier-float strength instead of weakness.'
+    );
+  }
+
+  if ((metricName.includes('roe') || metricName.includes('return on equity')) && /(leverage|apalancamiento|multiplier|inflated roe)/.test(combinedContext)) {
+    specialHints.push(
+      currentLang === 'es'
+        ? 'Caso especial: ROE muy alto puede estar inflado por apalancamiento/equity reducido; validar ROA y multiplicador de patrimonio.'
+        : 'Special case: very high ROE can be leverage-inflated by small equity; validate ROA and the equity multiplier.'
+    );
+  }
+
+  if (metricName.includes('enterprise value vs market cap') && /\$0\.0b|\b0\.0b\b|\b0\b/.test(combinedContext)) {
+    specialHints.push(
+      currentLang === 'es'
+        ? '⚠️ Dato de valoración inconsistente: EV o Market Cap en cero sugiere fallo de extracción/mapeo/unidades.'
+        : '⚠️ Inconsistent valuation datapoint: EV or Market Cap at zero suggests extraction/mapping/unit issues.'
+    );
+  }
+
+  if (metricName.includes('net debt / net cash')) {
+    specialHints.push(
+      currentLang === 'es'
+        ? 'Chequeo: usar definición consistente de caja (incluyendo o no inversiones a corto plazo) para evitar contradicciones entre secciones.'
+        : 'Check: use a consistent cash definition (including or excluding short-term investments) to avoid cross-section contradictions.'
+    );
+  }
+
+  if (metricName.includes('cash / short-term debt')) {
+    specialHints.push(
+      currentLang === 'es'
+        ? 'Chequeo: cobertura baja aumenta riesgo de refinanciación inmediata, especialmente con crédito más restrictivo.'
+        : 'Check: low coverage increases near-term refinancing risk, especially in tighter credit markets.'
+    );
+  }
+
+  if (metricName.includes('total shareholder return') && /(\d{4,}|%)/.test(combinedContext)) {
+    specialHints.push(
+      currentLang === 'es'
+        ? 'Sanity check: si el TSR parece imposible, revisar fórmula y unidades (porcentaje vs base monetaria).'
+        : 'Sanity check: if TSR looks implausible, re-check formula and units (percentage vs monetary base).'
+    );
+  }
+
+  const specialText = specialHints.length
+    ? `\n• ${specialHints.join('\n• ')}`
+    : '';
+
+  if (pack) {
+    return currentLang === 'es'
+      ? `Interpretación: ${positiveBias}
+• Qué significa: ${pack.definition}
+• Qué mirar: ${pack.lookFor}
+• Rangos guía: ${pack.thresholds}${shortRule ? ` | Regla del modelo: ${shortRule}.` : ''}
+• Trampas habituales: ${pack.pitfalls}
+• Pregunta clave: ${pack.nextQuestions}
+• ${sanityHint}${specialText}`
+      : `Interpretation: ${positiveBias}
+• What it means: ${pack.definition}
+• What to look for: ${pack.lookFor}
+• Guide ranges: ${pack.thresholds}${shortRule ? ` | Model rule: ${shortRule}.` : ''}
+• Common pitfalls: ${pack.pitfalls}
+• Key question: ${pack.nextQuestions}
+• ${sanityHint}${specialText}`;
+  }
+
+  return currentLang === 'es'
+    ? `Interpretación: ${positiveBias} ${fallbackDirection}${shortRule ? ` Regla del modelo: ${shortRule}.` : ''}
+• ${sanityHint}${specialText}`
+    : `Interpretation: ${positiveBias} ${fallbackDirection}${shortRule ? ` Model rule: ${shortRule}.` : ''}
+• ${sanityHint}${specialText}`;
 }
 
 function makeItem(
@@ -1213,9 +2440,24 @@ function makeItem(
   explanation,
   meta = {}
 ) {
+  const rawScoreRule =
+    meta.scoreRule || deriveScoreRule(name, detail, signalText, explanation);
+  const detailText = detail || '';
+  const interpretation = buildMetricInterpretation(
+    name,
+    rawScoreRule,
+    signal || 'neutral',
+    signalText || '',
+    detailText,
+    explanation || ''
+  );
+  const mergedDetail = detailText
+    ? `${detailText}\n${interpretation}`
+    : interpretation;
+
   return {
     name,
-    detail: detail || '',
+    detail: mergedDetail,
     values: vals || [],
     signal: signal || 'neutral',
     signalText: signalText || '',
@@ -1224,8 +2466,7 @@ function makeItem(
     highConfidence: meta.highConfidence !== false,
     confidence: getConfidence(vals || []),
     labels: meta.labels || vals?.labels || [],
-    scoreRule:
-      meta.scoreRule || deriveScoreRule(name, detail, signalText, explanation)
+    scoreRule: rawScoreRule
   };
 }
 
@@ -1364,23 +2605,54 @@ export function analyze(data, profile = 'default', options = {}) {
   const debtCore = findRowAny(bs, 'Total Debt', 'Deuda total');
   const invCore = findRowAny(bs, 'Inventory', 'Inventories', 'Inventarios');
   const assetsCore = findRowAny(bs, 'Total Assets', 'Activos totales');
+  const goodwillCore = findRowAny(bs, 'Goodwill', 'Fondo de comercio');
+  const intangiblesCore = findRowAny(bs, 'Other Intangibles', 'Intangible Assets', 'Activos intangibles');
+  const rdCore = findRowAny(is, 'Research and Development', 'R&D', 'Gastos de investigación');
+  const sbcProfileRow = findRowAny(cf, 'Stock-Based Compensation', 'Compensación basada en acciones');
+  const ppeCore = findRowAny(bs, 'Net Property Plant And Equipment', 'PP&E', 'Propiedad, planta y equipo');
+  const netDebtEbitdaCore = findRowAny(ratios, 'Net Debt / EBITDA', 'Deuda Neta / EBITDA');
 
   if (profile === 'auto') {
     const gm = getLatest(grossMarginRowCore);
+    const revLatest = getLatest(revenueRow);
+    const assetsLatest = getLatest(assetsCore);
     const capexSales =
-      getLatest(capexCore) !== null && getLatest(revenueRow)
-        ? (Math.abs(getLatest(capexCore)) / getLatest(revenueRow)) * 100
+      getLatest(capexCore) !== null && revLatest
+        ? (Math.abs(getLatest(capexCore)) / revLatest) * 100
         : null;
     const invPctAssets =
-      getLatest(invCore) !== null && getLatest(assetsCore)
-        ? (Math.abs(getLatest(invCore)) / getLatest(assetsCore)) * 100
+      getLatest(invCore) !== null && assetsLatest
+        ? (Math.abs(getLatest(invCore)) / assetsLatest) * 100
         : null;
-    const ndE = null;
+    const ndE = getLatest(netDebtEbitdaCore);
+    const goodwillIntangiblesToAssets =
+      assetsLatest && assetsLatest > 0
+        ? (((getLatest(goodwillCore) || 0) + (getLatest(intangiblesCore) || 0)) /
+            assetsLatest) *
+          100
+        : null;
+    const rdSales =
+      getLatest(rdCore) !== null && revLatest
+        ? (Math.abs(getLatest(rdCore)) / revLatest) * 100
+        : null;
+    const sbcSales =
+      getLatest(sbcProfileRow) !== null && revLatest
+        ? (Math.abs(getLatest(sbcProfileRow)) / revLatest) * 100
+        : null;
+    const ppeAssets =
+      getLatest(ppeCore) !== null && assetsLatest
+        ? (Math.abs(getLatest(ppeCore)) / assetsLatest) * 100
+        : null;
     const inferred = inferProfile({
       grossMargin: gm,
       capexSales,
       inventoryToAssets: invPctAssets,
-      netDebtEbitda: ndE
+      netDebtEbitda: ndE,
+      goodwillIntangiblesToAssets,
+      rdSales,
+      sbcSales,
+      ppeAssets,
+      sectorHint: options.sector || options.industry || null
     });
     activeProfile = inferred.profile;
     results.profileInference = inferred;
@@ -1393,14 +2665,17 @@ export function analyze(data, profile = 'default', options = {}) {
 
   if (revenueRow) {
     const vals = getRecentValues(revenueRow, 10);
-    const latest = vals[vals.length - 1];
-    const five = vals.length >= 6 ? vals[vals.length - 6] : vals[0];
-    const years = vals.length >= 6 ? 5 : vals.length - 1;
-    const gr = cagr(five, latest, years);
+    const cagrWindow = getLatestCagrWindow(revenueRow, 5, 12);
+    const gr = cagrWindow?.growth ?? null;
+    const years = cagrWindow?.years ?? null;
+    const startValue = cagrWindow?.startValue ?? null;
+    const endValue = cagrWindow?.endValue ?? null;
     growthItems.push(
       makeItem(
         'Revenue Growth (CAGR)',
-        gr !== null ? `${years}Y CAGR: ${gr.toFixed(1)}%` : 'Insufficient data',
+        gr !== null && years !== null
+          ? `${years}Y CAGR: ${gr.toFixed(1)}%`
+          : 'Insufficient data',
         vals,
         gr > 15 ? 'bull' : gr > 8 ? 'neutral' : 'bear',
         gr > 15
@@ -1410,7 +2685,9 @@ export function analyze(data, profile = 'default', options = {}) {
             : gr > 0
               ? 'Slow'
               : 'Declining',
-        `Revenue: ${five?.toFixed(0)} → ${latest?.toFixed(0)}`
+        startValue !== null && endValue !== null
+          ? `Revenue: ${startValue.toFixed(0)} → ${endValue.toFixed(0)}`
+          : ''
       )
     );
 
@@ -1421,16 +2698,19 @@ export function analyze(data, profile = 'default', options = {}) {
       const latestYoy = validYoy[validYoy.length - 1];
       const avgYoy = avg(validYoy);
       const sd = stddev(validYoy);
-      const consistent = sd !== null && sd < 10;
       growthItems.push(
         makeItem(
           'Revenue YoY Growth',
           `Latest YoY: ${latestYoy?.toFixed(1)}% | Avg: ${avgYoy?.toFixed(1)}%`,
           validYoy,
           latestYoy > 10 ? 'bull' : latestYoy > 3 ? 'neutral' : 'bear',
-          consistent ? 'Consistent' : 'Volatile',
+          sd !== null && sd < 5
+            ? 'Stable'
+            : sd !== null && sd < 10
+              ? 'Moderate variability'
+              : 'Volatile',
           sd !== null
-            ? `Std dev: ${sd.toFixed(1)}pp — ${consistent ? 'predictable' : 'erratic'} growth`
+            ? `Std dev: ${sd.toFixed(1)}pp — ${sd < 5 ? 'stable' : sd < 10 ? 'moderately variable' : 'erratic'} growth`
             : ''
         )
       );
@@ -1575,15 +2855,7 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   if (growthItems.length) {
-    const bullCount = growthItems.filter((i) => i.signal === 'bull').length;
-    const grade =
-      bullCount >= 4
-        ? 'excellent'
-        : bullCount >= 2
-          ? 'good'
-          : bullCount >= 1
-            ? 'average'
-            : 'poor';
+    const grade = sectionGrade(growthItems);
     results.scores.growth = grade;
     results.sections.push({
       id: 'growth',
@@ -1617,23 +2889,25 @@ export function analyze(data, profile = 'default', options = {}) {
     const latest = vals[vals.length - 1];
     const trend = getTrend(vals);
     const sd = stddev(vals);
+    const grossClass = classifyHigher(
+      latest,
+      mt('gross_margin', 'bull'),
+      mt('gross_margin', 'neutral'),
+      { info: 'Not enough data', neutral: 'Decent', bear: 'Thin' }
+    );
     marginItems.push(
       makeItem(
         'Gross Margin',
-        `Latest: ${latest?.toFixed(1)}% — Trend: ${trend}`,
+        latest != null
+          ? `Latest: ${latest.toFixed(1)}% — Trend: ${trend}`
+          : 'Not enough data',
         vals,
-        latest > mt('gross_margin', 'bull')
-          ? 'bull'
-          : latest > mt('gross_margin', 'neutral')
-            ? 'neutral'
-            : 'bear',
-        latest > mt('gross_margin', 'bull') + 10
+        grossClass.signal,
+        latest != null && latest > mt('gross_margin', 'bull') + 10
           ? 'Wide Moat'
-          : latest > mt('gross_margin', 'bull')
+          : latest != null && latest > mt('gross_margin', 'bull')
             ? 'Strong'
-            : latest > mt('gross_margin', 'neutral')
-              ? 'Decent'
-              : 'Thin',
+            : grossClass.label,
         sd !== null
           ? `Stability: σ=${sd.toFixed(1)}pp (${sd < 3 ? 'very stable' : sd < 6 ? 'stable' : 'volatile'})`
           : ''
@@ -1654,19 +2928,24 @@ export function analyze(data, profile = 'default', options = {}) {
     const vals = getRecentValues(opSrc, 10);
     const latest = vals[vals.length - 1];
     const trend = getTrend(vals);
+    const opClass = classifyHigher(latest, 20, 10, {
+      info: 'Not enough data',
+      neutral: 'Healthy',
+      bear: 'Compressed'
+    });
     marginItems.push(
       makeItem(
         'Operating Margin (EBIT)',
-        `Latest: ${latest?.toFixed(1)}% — Trend: ${trend}`,
+        latest != null
+          ? `Latest: ${latest.toFixed(1)}% — Trend: ${trend}`
+          : 'Not enough data',
         vals,
-        latest > 20 ? 'bull' : latest > 10 ? 'neutral' : 'bear',
-        latest > 25
+        opClass.signal,
+        latest != null && latest > 25
           ? 'Best-in-class'
-          : latest > 20
+          : latest != null && latest > 20
             ? 'Excellent'
-            : latest > 10
-              ? 'Healthy'
-              : 'Compressed'
+            : opClass.label
       )
     );
   }
@@ -1675,19 +2954,18 @@ export function analyze(data, profile = 'default', options = {}) {
   if (ebitdaMarginRow) {
     const vals = getRecentValues(ebitdaMarginRow, 10);
     const latest = vals[vals.length - 1];
+    const ebitdaClass = classifyHigher(latest, 25, 15, {
+      info: 'Not enough data',
+      neutral: 'Fair',
+      bear: 'Low'
+    });
     marginItems.push(
       makeItem(
         'EBITDA Margin',
-        `Latest: ${latest?.toFixed(1)}%`,
+        latest != null ? `Latest: ${latest.toFixed(1)}%` : 'Not enough data',
         vals,
-        latest > 25 ? 'bull' : latest > 15 ? 'neutral' : 'bear',
-        latest > 30
-          ? 'Elite'
-          : latest > 25
-            ? 'Strong'
-            : latest > 15
-              ? 'Fair'
-              : 'Low'
+        ebitdaClass.signal,
+        latest != null && latest > 30 ? 'Elite' : latest != null && latest > 25 ? 'Strong' : ebitdaClass.label
       )
     );
   }
@@ -1698,19 +2976,22 @@ export function analyze(data, profile = 'default', options = {}) {
   if (netMSrc) {
     const vals = getRecentValues(netMSrc, 10);
     const latest = vals[vals.length - 1];
+    const netMarginClass = classifyHigher(latest, 15, 8, {
+      info: 'Not enough data',
+      neutral: 'OK',
+      bear: 'Low'
+    });
     marginItems.push(
       makeItem(
         'Net Profit Margin',
-        `Latest: ${latest?.toFixed(1)}%`,
+        latest != null ? `Latest: ${latest.toFixed(1)}%` : 'Not enough data',
         vals,
-        latest > 15 ? 'bull' : latest > 8 ? 'neutral' : 'bear',
-        latest > 20
+        netMarginClass.signal,
+        latest != null && latest > 20
           ? 'Exceptional'
-          : latest > 15
+          : latest != null && latest > 15
             ? 'High Quality'
-            : latest > 8
-              ? 'OK'
-              : 'Low'
+            : netMarginClass.label
       )
     );
   }
@@ -1725,19 +3006,22 @@ export function analyze(data, profile = 'default', options = {}) {
   if (fcfMSrc) {
     const vals = getRecentValues(fcfMSrc, 10);
     const latest = vals[vals.length - 1];
+    const fcfMarginClass = classifyHigher(latest, 20, 10, {
+      info: 'Not enough data',
+      neutral: 'Solid',
+      bear: 'Weak'
+    });
     marginItems.push(
       makeItem(
         'FCF Margin',
-        `Latest: ${latest?.toFixed(1)}%`,
+        latest != null ? `Latest: ${latest.toFixed(1)}%` : 'Not enough data',
         vals,
-        latest > 20 ? 'bull' : latest > 10 ? 'neutral' : 'bear',
-        latest > 25
+        fcfMarginClass.signal,
+        latest != null && latest > 25
           ? 'Cash Machine'
-          : latest > 20
+          : latest != null && latest > 20
             ? 'Excellent'
-            : latest > 10
-              ? 'Solid'
-              : 'Weak'
+            : fcfMarginClass.label
       )
     );
   }
@@ -1770,15 +3054,7 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   if (marginItems.length) {
-    const bullCount = marginItems.filter((i) => i.signal === 'bull').length;
-    const grade =
-      bullCount >= 4
-        ? 'excellent'
-        : bullCount >= 2
-          ? 'good'
-          : bullCount >= 1
-            ? 'average'
-            : 'poor';
+    const grade = sectionGrade(marginItems);
     results.scores.margins = grade;
     results.sections.push({
       id: 'margins',
@@ -1802,20 +3078,19 @@ export function analyze(data, profile = 'default', options = {}) {
     'COGS'
   );
   if (cogsRow && revenueRow) {
-    const cogsVals = getRecentValues(cogsRow, 6);
-    const revVals = getRecentValues(revenueRow, 6);
-    if (cogsVals.length >= 2 && revVals.length >= 2) {
+    const { pairs, series } = ratioPctSeries(cogsRow, revenueRow, 6);
+    if (series.length >= 2) {
       const latestPct =
-        (Math.abs(cogsVals[cogsVals.length - 1]) /
-          Math.abs(revVals[revVals.length - 1])) *
+        (Math.abs(pairs[pairs.length - 1].a) /
+          Math.abs(pairs[pairs.length - 1].b)) *
         100;
-      const firstPct = (Math.abs(cogsVals[0]) / Math.abs(revVals[0])) * 100;
+      const firstPct = (Math.abs(pairs[0].a) / Math.abs(pairs[0].b)) * 100;
       const delta = latestPct - firstPct;
       costItems.push(
         makeItem(
           'COGS as % of Revenue',
           `Latest: ${latestPct.toFixed(1)}% (Δ ${delta > 0 ? '+' : ''}${delta.toFixed(1)}pp)`,
-          cogsVals,
+          pairs.map((p) => (p.a / p.b) * 100),
           delta < -2 ? 'bull' : delta < 2 ? 'neutral' : 'bear',
           delta < -2 ? 'Improving' : delta < 2 ? 'Stable' : 'Rising Costs'
         )
@@ -1865,19 +3140,17 @@ export function analyze(data, profile = 'default', options = {}) {
     'admin'
   ]);
   if (sgaRow && revenueRow) {
-    const sgaVals = getRecentValues(sgaRow, 6);
-    const revVals = getRecentValues(revenueRow, 6);
-    if (sgaVals.length >= 2 && revVals.length >= 2) {
+    const { series } = ratioPctSeries(sgaRow, revenueRow, 6);
+    if (series.length >= 2) {
       const latestPct =
-        (Math.abs(sgaVals[sgaVals.length - 1]) / revVals[revVals.length - 1]) *
-        100;
-      const firstPct = (Math.abs(sgaVals[0]) / revVals[0]) * 100;
+        series[series.length - 1];
+      const firstPct = series[0];
       const delta = latestPct - firstPct;
       costItems.push(
         makeItem(
           'SG&A as % of Revenue',
           `Latest: ${latestPct.toFixed(1)}% (Δ ${delta > 0 ? '+' : ''}${delta.toFixed(1)}pp)`,
-          sgaVals.map((v) => Math.abs(v)),
+          series,
           delta < -1 ? 'bull' : latestPct < 25 ? 'neutral' : 'bear',
           delta < -1
             ? 'Improving Efficiency'
@@ -1899,17 +3172,15 @@ export function analyze(data, profile = 'default', options = {}) {
     ['r&d', 'expense']
   );
   if (rdRow && revenueRow) {
-    const rdVals = getRecentValues(rdRow, 6);
-    const revVals = getRecentValues(revenueRow, 6);
-    if (rdVals.length >= 2 && revVals.length >= 2) {
+    const { series } = ratioPctSeries(rdRow, revenueRow, 6);
+    if (series.length >= 2) {
       const latestPct =
-        (Math.abs(rdVals[rdVals.length - 1]) / revVals[revVals.length - 1]) *
-        100;
+        series[series.length - 1];
       costItems.push(
         makeItem(
           'R&D as % of Revenue',
           `Latest: ${latestPct.toFixed(1)}%`,
-          rdVals.map((v) => Math.abs(v)),
+          series,
           latestPct > 5 ? 'bull' : latestPct > 2 ? 'neutral' : 'neutral',
           latestPct > 15
             ? 'Heavy Investment'
@@ -1930,24 +3201,22 @@ export function analyze(data, profile = 'default', options = {}) {
     'D&A'
   );
   if (daRow && revenueRow) {
-    const daVals = getRecentValues(daRow, 6);
-    const revVals = getRecentValues(revenueRow, 6);
-    if (daVals.length >= 2 && revVals.length >= 2) {
+    const { series } = ratioPctSeries(daRow, revenueRow, 6);
+    if (series.length >= 2) {
       const latestPct =
-        (Math.abs(daVals[daVals.length - 1]) / revVals[revVals.length - 1]) *
-        100;
+        series[series.length - 1];
       costItems.push(
         makeItem(
           'D&A as % of Revenue',
           `Latest: ${latestPct.toFixed(1)}%`,
-          daVals.map((v) => Math.abs(v)),
+          series,
           latestPct < 5 ? 'bull' : latestPct < 10 ? 'neutral' : 'bear',
           latestPct < 5
             ? 'Asset-light'
             : latestPct < 10
               ? 'Moderate'
               : 'Capital Intensive',
-          'High D&A = heavy fixed assets or acquisitions with amortization'
+          'Measures depreciation/amortization intensity: higher values can reflect asset-heavy operations or acquisition-related amortization.'
         )
       );
     }
@@ -1963,7 +3232,7 @@ export function analyze(data, profile = 'default', options = {}) {
     const vals = getRecentValues(taxRateRow, 6);
     const latest = vals[vals.length - 1];
     const sd = stddev(vals);
-    if (latest !== null) {
+    if (latest != null) {
       costItems.push(
         makeItem(
           'Effective Tax Rate',
@@ -1992,18 +3261,16 @@ export function analyze(data, profile = 'default', options = {}) {
   // Interest Expense analysis
   const intExpRow = findRowAny(is, 'Gastos por intereses', 'Interest Expense');
   if (intExpRow && revenueRow) {
-    const intVals = getRecentValues(intExpRow, 6);
-    const revVals = getRecentValues(revenueRow, 6);
-    if (intVals.length >= 1 && revVals.length >= 1) {
+    const { series } = ratioPctSeries(intExpRow, revenueRow, 6);
+    if (series.length >= 1) {
       const latestPct =
-        (Math.abs(intVals[intVals.length - 1]) / revVals[revVals.length - 1]) *
-        100;
+        series[series.length - 1];
       if (latestPct > 0.5) {
         costItems.push(
           makeItem(
             'Interest Expense as % of Revenue',
             `Latest: ${latestPct.toFixed(1)}%`,
-            intVals.map((v) => Math.abs(v)),
+            series,
             latestPct < 2 ? 'bull' : latestPct < 5 ? 'neutral' : 'bear',
             latestPct < 2
               ? 'Minimal'
@@ -2024,17 +3291,15 @@ export function analyze(data, profile = 'default', options = {}) {
     'Stock Based Comp'
   );
   if (sbcRow && revenueRow) {
-    const sbcVals = getRecentValues(sbcRow, 6);
-    const revVals = getRecentValues(revenueRow, 6);
-    if (sbcVals.length >= 1 && revVals.length >= 1) {
+    const { series } = ratioPctSeries(sbcRow, revenueRow, 6);
+    if (series.length >= 1) {
       const latestPct =
-        (Math.abs(sbcVals[sbcVals.length - 1]) / revVals[revVals.length - 1]) *
-        100;
+        series[series.length - 1];
       costItems.push(
         makeItem(
           'Stock-Based Comp as % of Revenue',
           `Latest: ${latestPct.toFixed(1)}%`,
-          sbcVals.map((v) => Math.abs(v)),
+          series,
           latestPct < 3 ? 'bull' : latestPct < 8 ? 'neutral' : 'bear',
           latestPct < 3
             ? 'Low Dilution'
@@ -2048,16 +3313,7 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   if (costItems.length) {
-    const bullCount = costItems.filter((i) => i.signal === 'bull').length;
-    const bearCount = costItems.filter((i) => i.signal === 'bear').length;
-    const grade =
-      bullCount >= 3
-        ? 'excellent'
-        : bullCount >= 2
-          ? 'good'
-          : bearCount >= 2
-            ? 'poor'
-            : 'average';
+    const grade = sectionGrade(costItems);
     results.scores.costs = grade;
     results.sections.push({
       id: 'costs',
@@ -2113,23 +3369,63 @@ export function analyze(data, profile = 'default', options = {}) {
     'ROE',
     'Return on Equity'
   );
+  const bsAssetsForMultiplier = findRowAny(bs, 'Total Assets', 'Activo total', 'Activos totales');
+  const bsEquityForMultiplier = findRowAny(
+    bs,
+    'Total Equity',
+    'Total Common Equity',
+    'Fondos propios totales',
+    'Patrimonio neto común total'
+  );
+
   if (roeRow) {
     const vals = getRecentValues(roeRow, 10);
     const latest = vals[vals.length - 1];
+    const roaRowForRoe = findRowAny(
+      ratios,
+      'Rentabilidad sobre activos',
+      'ROA',
+      'Return on Assets'
+    );
+    const roaForRoe = getLatest(roaRowForRoe);
+    const equityMultiplierForRoe = computeEquityMultiplierFromBalance(
+      bsAssetsForMultiplier,
+      bsEquityForMultiplier,
+      2
+    );
+    const leverageInflatedRoe =
+      equityMultiplierForRoe !== null && equityMultiplierForRoe > 4;
+    const equityRiskFlag = hasNonPositiveEquity(bsEquityForMultiplier, 2);
     moatItems.push(
       makeItem(
         'ROE (Return on Equity)',
         `Latest: ${latest?.toFixed(1)}%`,
         vals,
-        latest > 20 ? 'bull' : latest > 12 ? 'neutral' : 'bear',
-        latest > 25
-          ? 'Outstanding'
-          : latest > 20
-            ? 'Excellent'
+        equityRiskFlag
+          ? 'neutral'
+          : leverageInflatedRoe
+            ? 'neutral'
+            : latest > 20
+            ? 'bull'
             : latest > 12
-              ? 'Good'
-              : 'Below Average',
-        'Beware: high leverage can inflate ROE artificially'
+              ? 'neutral'
+              : 'bear',
+        equityRiskFlag
+          ? 'Equity base is low/negative'
+          : leverageInflatedRoe
+            ? 'High ROE but leverage-inflated'
+            : latest > 25
+            ? 'Outstanding'
+            : latest > 20
+              ? 'Excellent'
+              : latest > 12
+                ? 'Good'
+                : 'Below Average',
+        equityRiskFlag
+          ? 'ROE may be distorted because average equity is low or negative in recent periods.'
+          : leverageInflatedRoe
+            ? 'ROE appears high, but equity multiplier suggests leverage-driven inflation. Validate with ROA/ROIC.'
+            : 'Beware: high leverage can inflate ROE artificially'
       )
     );
   }
@@ -2162,13 +3458,15 @@ export function analyze(data, profile = 'default', options = {}) {
 
   // Dupont decomposition insight: ROE driven by margins vs leverage
   if (roeRow && roaRow) {
-    const roe = getLatest(roeRow);
-    const roa = getLatest(roaRow);
-    if (roe && roa && roa !== 0) {
-      const equityMultiplier = roe / roa;
+    const equityMultiplier = computeEquityMultiplierFromBalance(
+      bsAssetsForMultiplier,
+      bsEquityForMultiplier,
+      2
+    );
+    if (equityMultiplier !== null) {
       moatItems.push(
         makeItem(
-          'Equity Multiplier (ROE/ROA)',
+          'Equity Multiplier (Assets/Equity)',
           `${equityMultiplier.toFixed(1)}x — ${equityMultiplier < 2 ? 'Low leverage' : equityMultiplier < 3 ? 'Moderate leverage' : 'High leverage'}`,
           [],
           equityMultiplier < 2
@@ -2181,7 +3479,7 @@ export function analyze(data, profile = 'default', options = {}) {
             : equityMultiplier < 3
               ? 'Some Leverage'
               : 'Leverage-driven ROE',
-          'ROE = ROA × Equity Multiplier. Lower multiplier = ROE driven by profitability, not debt'
+          'Computed from balance sheet averages (Assets/Equity). Lower multiplier = ROE driven by profitability, not debt'
         )
       );
     }
@@ -2191,7 +3489,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (fcfNetRow) {
     const vals = getRecentValues(fcfNetRow, 8);
     const latest = vals[vals.length - 1];
-    if (latest !== null && latest < 0) {
+    if (latest != null && latest < 0) {
       moatItems.push(
         makeItem(
           'FCF / Net Income (Earnings Quality)',
@@ -2244,15 +3542,7 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   if (moatItems.length) {
-    const bullCount = moatItems.filter((i) => i.signal === 'bull').length;
-    const grade =
-      bullCount >= 4
-        ? 'excellent'
-        : bullCount >= 2
-          ? 'good'
-          : bullCount >= 1
-            ? 'average'
-            : 'poor';
+    const grade = sectionGrade(moatItems);
     results.scores.moat = grade;
     results.sections.push({
       id: 'moat',
@@ -2295,16 +3585,14 @@ export function analyze(data, profile = 'default', options = {}) {
   const totalAssetsRow = findRowAny(bs, 'Activos totales', 'Total Assets');
 
   if (cashRow && totalAssetsRow) {
-    const cashVals = getRecentValues(cashRow, 6);
-    const taVals = getRecentValues(totalAssetsRow, 6);
-    if (cashVals.length >= 1 && taVals.length >= 1) {
-      const cashPct =
-        (cashVals[cashVals.length - 1] / taVals[taVals.length - 1]) * 100;
+    const pairs = alignByDate(cashRow, totalAssetsRow, 6);
+    if (pairs.length >= 1) {
+      const cashPct = (pairs[pairs.length - 1].a / pairs[pairs.length - 1].b) * 100;
       bsItems.push(
         makeItem(
           'Cash & Equivalents / Total Assets',
-          `Latest: ${cashPct.toFixed(1)}% ($${cashVals[cashVals.length - 1].toFixed(0)}M)`,
-          cashVals,
+          `Latest: ${cashPct.toFixed(1)}% ($${pairs[pairs.length - 1].a.toFixed(0)}M)`,
+          pairs.map((p) => (p.a / p.b) * 100),
           cashPct > 15 ? 'bull' : cashPct > 5 ? 'neutral' : 'bear',
           cashPct > 20
             ? 'Cash Rich'
@@ -2319,27 +3607,35 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   if (arRow && revenueRow) {
-    const arVals = getRecentValues(arRow, 6);
-    const revVals = getRecentValues(revenueRow, 6);
-    if (arVals.length >= 2 && revVals.length >= 2) {
-      const arDays =
-        (arVals[arVals.length - 1] / revVals[revVals.length - 1]) * 365;
-      const trend = getTrend(
-        arVals.map((v, i) => (revVals[i] ? (v / revVals[i]) * 365 : null))
-      );
+    const pairs = alignByDate(arRow, revenueRow, 6);
+    if (pairs.length >= 2) {
+      const arDays = (pairs[pairs.length - 1].a / pairs[pairs.length - 1].b) * 365;
+      const trend = getTrend(pairs.map((p) => (p.b ? (p.a / p.b) * 365 : null)));
       bsItems.push(
         makeItem(
           'Accounts Receivable (Days)',
           `~${arDays.toFixed(0)} days — Trend: ${trend}`,
-          arVals,
-          arDays < 45 ? 'bull' : arDays < 75 ? 'neutral' : 'bear',
-          arDays < 30
-            ? 'Quick Collection'
+          pairs.map((p) => (p.b ? (p.a / p.b) * 365 : null)),
+          trend === 'up'
+            ? arDays < 45
+              ? 'neutral'
+              : 'bear'
             : arDays < 45
-              ? 'Healthy'
+              ? 'bull'
               : arDays < 75
-                ? 'Normal'
-                : 'Slow Collection'
+                ? 'neutral'
+                : 'bear',
+          trend === 'up'
+            ? arDays < 45
+              ? 'Rising collection days (watch)'
+              : 'Collections weakening'
+            : arDays < 30
+              ? 'Quick Collection'
+              : arDays < 45
+                ? 'Healthy'
+                : arDays < 75
+                  ? 'Normal'
+                  : 'Slow Collection'
         )
       );
     }
@@ -2395,7 +3691,7 @@ export function analyze(data, profile = 'default', options = {}) {
           [],
           pct < 15 ? 'bull' : pct < 35 ? 'neutral' : 'bear',
           pct < 10
-            ? 'Organic Growth'
+            ? 'Low acquisition-intangibles concentration'
             : pct < 15
               ? 'Low'
               : pct < 35
@@ -2453,14 +3749,14 @@ export function analyze(data, profile = 'default', options = {}) {
         'Retained Earnings',
         `Latest: $${latest?.toFixed(0)}M — Trend: ${trend}`,
         vals,
-        trend === 'up' && latest > 0 ? 'bull' : latest > 0 ? 'neutral' : 'bear',
+        trend === 'up' && latest > 0 ? 'bull' : latest > 0 ? 'neutral' : 'neutral',
         latest < 0
-          ? 'Accumulated Deficit ⚠️'
+          ? 'Needs context (capital returns vs losses)'
           : trend === 'up'
             ? 'Growing'
             : 'Flat/Declining',
         latest < 0
-          ? 'Negative retained earnings = company has not been profitable historically'
+          ? 'Negative retained earnings may reflect cumulative buybacks/dividends, not necessarily historical unprofitability. Confirm with NI history, buybacks, dividends, and equity trend.'
           : ''
       )
     );
@@ -2493,16 +3789,7 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   if (bsItems.length) {
-    const bullCount = bsItems.filter((i) => i.signal === 'bull').length;
-    const bearCount = bsItems.filter((i) => i.signal === 'bear').length;
-    const grade =
-      bullCount >= 4
-        ? 'excellent'
-        : bullCount >= 2
-          ? 'good'
-          : bearCount >= 3
-            ? 'poor'
-            : 'average';
+    const grade = sectionGrade(bsItems);
     results.scores.balance = grade;
     results.sections.push({
       id: 'balance-composition',
@@ -2521,6 +3808,8 @@ export function analyze(data, profile = 'default', options = {}) {
   const debtEquityRow = findRowAny(
     ratios,
     'Deuda total / Fondos propios',
+    'Deuda total / capital total',
+    'Pasivo total / Activo total',
     'Total Debt/Equity',
     'Debt to Equity'
   );
@@ -2544,9 +3833,47 @@ export function analyze(data, profile = 'default', options = {}) {
     );
   }
 
+  const debtCapitalRow = findRowAny(
+    ratios,
+    'Deuda total / Capital total',
+    'Total Debt / Capital'
+  );
+  if (debtCapitalRow) {
+    const vals = getRecentValues(debtCapitalRow, 8);
+    const latest = vals[vals.length - 1];
+    debtItems.push(
+      makeItem(
+        'Total Debt / Capital',
+        `Latest: ${latest?.toFixed(1)}%`,
+        vals,
+        latest < 35 ? 'bull' : latest < 55 ? 'neutral' : 'bear',
+        latest < 35 ? 'Conservative' : latest < 55 ? 'Moderate' : 'Leveraged'
+      )
+    );
+  }
+
+  const liabilitiesAssetsRow = findRowAny(
+    ratios,
+    'Pasivo total / Activo total',
+    'Total Liabilities / Total Assets'
+  );
+  if (liabilitiesAssetsRow) {
+    const vals = getRecentValues(liabilitiesAssetsRow, 8);
+    const latest = vals[vals.length - 1];
+    debtItems.push(
+      makeItem(
+        'Total Liabilities / Total Assets',
+        `Latest: ${latest?.toFixed(1)}%`,
+        vals,
+        latest < 55 ? 'bull' : latest < 70 ? 'neutral' : 'bear',
+        latest < 55 ? 'Asset-backed' : latest < 70 ? 'Balanced' : 'Liability Heavy'
+      )
+    );
+  }
+
+  const ndERow2 = findRowAny(ratios, 'Net Debt / EBITDA', 'Deuda Neta / EBITDA');
   const netDebtEbitdaRow = findRowAny(ce, 'Deuda Neta / EBITDA');
-  const ndERow2 = findRowAny(ratios, 'Net Debt / EBITDA');
-  const ndeSrc = netDebtEbitdaRow || ndERow2;
+  const ndeSrc = ndERow2 || netDebtEbitdaRow;
   if (ndeSrc) {
     const vals = getRecentValues(ndeSrc, 6);
     const latest = vals[vals.length - 1];
@@ -2610,20 +3937,38 @@ export function analyze(data, profile = 'default', options = {}) {
   if (currentRatioRow) {
     const vals = getRecentValues(currentRatioRow, 6);
     const latest = vals[vals.length - 1];
+    const cccContextRow = findRowAny(ratios, 'Cash Conversion Cycle', 'Ciclo de conversión');
+    const cccLatest = getLatest(cccContextRow);
+    const cfoLiquidityRow = findRowAny(cf, 'Flujo de caja de las operaciones', 'Operating Cash Flow', 'Cash From Operations');
+    const cfoValsForLiquidity = getRecentValues(cfoLiquidityRow, 4);
+    const cfoPositiveShare = cfoValsForLiquidity.length
+      ? cfoValsForLiquidity.filter((v) => v > 0).length / cfoValsForLiquidity.length
+      : 0;
+    const floatModel = latest <= 1 && cccLatest !== null && cccLatest < 0 && cfoPositiveShare >= 0.75;
     debtItems.push(
       makeItem(
         'Current Ratio',
         `Latest: ${latest?.toFixed(2)}x`,
         vals,
-        latest > 1.5 ? 'bull' : latest > 1.0 ? 'neutral' : 'bear',
-        latest > 2.0
-          ? 'Very Healthy'
+        floatModel
+          ? 'neutral'
           : latest > 1.5
-            ? 'Healthy'
+            ? 'bull'
             : latest > 1.0
-              ? 'Adequate'
-              : 'Tight Liquidity ⚠️',
-        '',
+              ? 'neutral'
+              : 'bear',
+        floatModel
+          ? 'Low ratio but float model supported'
+          : latest > 2.0
+            ? 'Very Healthy'
+            : latest > 1.5
+              ? 'Healthy'
+              : latest > 1.0
+                ? 'Adequate'
+                : 'Tight Liquidity ⚠️',
+        floatModel
+          ? 'In negative-CCC models with strong CFO, sub-1 current ratio can be structural; still monitor maturities and stress scenarios.'
+          : '',
         {
           scoreRule:
             "latest > 1.5 ? 'bull' : latest > 1.0 ? 'neutral' : 'bear'; latest > 2.0 ? 'Very Healthy' : latest > 1.5 ? 'Healthy' : latest > 1.0 ? 'Adequate' : 'Tight Liquidity ⚠️'."
@@ -2642,20 +3987,38 @@ export function analyze(data, profile = 'default', options = {}) {
   if (quickRatioRow) {
     const vals = getRecentValues(quickRatioRow, 6);
     const latest = vals[vals.length - 1];
+    const cccContextRow = findRowAny(ratios, 'Cash Conversion Cycle', 'Ciclo de conversión');
+    const cccLatest = getLatest(cccContextRow);
+    const cfoLiquidityRow = findRowAny(cf, 'Flujo de caja de las operaciones', 'Operating Cash Flow', 'Cash From Operations');
+    const cfoValsForLiquidity = getRecentValues(cfoLiquidityRow, 4);
+    const cfoPositiveShare = cfoValsForLiquidity.length
+      ? cfoValsForLiquidity.filter((v) => v > 0).length / cfoValsForLiquidity.length
+      : 0;
+    const floatModel = latest <= 0.8 && cccLatest !== null && cccLatest < 0 && cfoPositiveShare >= 0.75;
     debtItems.push(
       makeItem(
         'Quick Ratio (Acid Test)',
         `Latest: ${latest?.toFixed(2)}x`,
         vals,
-        latest > 1.2 ? 'bull' : latest > 0.8 ? 'neutral' : 'bear',
-        latest > 1.5
-          ? 'Very Liquid'
+        floatModel
+          ? 'neutral'
           : latest > 1.2
-            ? 'Healthy'
+            ? 'bull'
             : latest > 0.8
-              ? 'OK'
-              : 'Low Liquidity ⚠️',
-        'Excludes inventory — more conservative than current ratio',
+              ? 'neutral'
+              : 'bear',
+        floatModel
+          ? 'Low quick ratio but float model supported'
+          : latest > 1.5
+            ? 'Very Liquid'
+            : latest > 1.2
+              ? 'Healthy'
+              : latest > 0.8
+                ? 'OK'
+                : 'Low Liquidity ⚠️',
+        floatModel
+          ? 'With negative CCC and strong CFO, low quick ratio can be structural; monitor funding access and near-term maturities.'
+          : 'Excludes inventory — more conservative than current ratio',
         {
           scoreRule:
             "latest > 1.2 ? 'bull' : latest > 0.8 ? 'neutral' : 'bear'; latest > 1.5 ? 'Very Liquid' : latest > 1.2 ? 'Healthy' : latest > 0.8 ? 'OK' : 'Low Liquidity ⚠️'; Excludes inventory."
@@ -2680,12 +4043,12 @@ export function analyze(data, profile = 'default', options = {}) {
   if (interestCovRow) {
     const vals = getRecentValues(interestCovRow, 6);
     const latest = vals[vals.length - 1];
-    if (latest !== null) {
+    if (latest != null) {
       const coverageLabel =
         interestCovRow === ebitInterestCovRow
           ? 'Interest Coverage (EBIT / Interest)'
           : interestCovRow === ffoInterestCovRow
-            ? 'Interest Coverage (FFO / Interest)'
+            ? 'Interest Coverage (Operating Cash Flow / Interest)'
             : 'Interest Coverage (EBITDA / Interest)';
       debtItems.push(
         makeItem(
@@ -2703,6 +4066,82 @@ export function analyze(data, profile = 'default', options = {}) {
         )
       );
     }
+  }
+
+  const ebitdaMinusCapexCovRow = findRowAny(
+    ratios,
+    '(EBITDA - Capex) / Gastos por intereses',
+    '(EBITDA - Capex) / Interest Expense'
+  );
+  if (ebitdaMinusCapexCovRow) {
+    const vals = getRecentValues(ebitdaMinusCapexCovRow, 6);
+    const latest = vals[vals.length - 1];
+    debtItems.push(
+      makeItem(
+        '(EBITDA - Capex) / Interest',
+        `Latest: ${latest?.toFixed(1)}x`,
+        vals,
+        latest > 8 ? 'bull' : latest > 3 ? 'neutral' : 'bear',
+        latest > 8 ? 'Well Covered' : latest > 3 ? 'Adequate' : 'Risky'
+      )
+    );
+  }
+
+  const ffoDebtRow = findRowAny(
+    ratios,
+    'FFO a deuda total',
+    'FFO to Total Debt'
+  );
+  if (ffoDebtRow) {
+    const vals = getRecentValues(ffoDebtRow, 6);
+    const latest = vals[vals.length - 1];
+    debtItems.push(
+      makeItem(
+        'FFO to Total Debt',
+        `Latest: ${latest?.toFixed(2)}x`,
+        vals,
+        latest > 0.4 ? 'bull' : latest > 0.2 ? 'neutral' : 'bear',
+        latest > 0.4 ? 'Strong Deleveraging Capacity' : latest > 0.2 ? 'Adequate' : 'Weak'
+      )
+    );
+  }
+
+  const totalDebtEbitdaRow = findRowAny(
+    ratios,
+    'Deuda total / EBITDA',
+    'Total Debt / EBITDA'
+  );
+  if (totalDebtEbitdaRow) {
+    const vals = getRecentValues(totalDebtEbitdaRow, 6);
+    const latest = vals[vals.length - 1];
+    debtItems.push(
+      makeItem(
+        'Total Debt / EBITDA',
+        `Latest: ${latest?.toFixed(2)}x`,
+        vals,
+        latest < 2 ? 'bull' : latest < 3.5 ? 'neutral' : 'bear',
+        latest < 2 ? 'Low Leverage' : latest < 3.5 ? 'Manageable' : 'High'
+      )
+    );
+  }
+
+  const netDebtEbitdaCapexRow = findRowAny(
+    ratios,
+    'Deuda Neta / (EBITDA - Capex)',
+    'Net Debt / (EBITDA - Capex)'
+  );
+  if (netDebtEbitdaCapexRow) {
+    const vals = getRecentValues(netDebtEbitdaCapexRow, 6);
+    const latest = vals[vals.length - 1];
+    debtItems.push(
+      makeItem(
+        'Net Debt / (EBITDA - Capex)',
+        `Latest: ${latest?.toFixed(2)}x`,
+        vals,
+        latest < 0 ? 'bull' : latest < 2.5 ? 'neutral' : 'bear',
+        latest < 0 ? 'Net Cash' : latest < 2.5 ? 'Comfortable' : 'Stretched'
+      )
+    );
   }
 
   const cashAssetsRow = findRowAny(ratios, 'Cash / Assets');
@@ -2727,18 +4166,7 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   if (debtItems.length) {
-    const bullCount = debtItems.filter((i) => i.signal === 'bull').length;
-    const bearCount = debtItems.filter((i) => i.signal === 'bear').length;
-    const grade =
-      bullCount >= 4
-        ? 'excellent'
-        : bullCount >= 2
-          ? 'good'
-          : bearCount >= 3
-            ? 'poor'
-            : bullCount >= 1
-              ? 'average'
-              : 'poor';
+    const grade = sectionGrade(debtItems);
     results.scores.debt = grade;
     results.sections.push({
       id: 'debt',
@@ -2789,14 +4217,15 @@ export function analyze(data, profile = 'default', options = {}) {
 
   // CFO vs Net Income (Accrual check)
   if (cfoRow && netIncRow) {
-    const cfoVals = getRecentValues(cfoRow, 6);
-    const niVals = getRecentValues(netIncRow, 6);
+    const pairs = alignByDate(cfoRow, netIncRow, 6);
+    const cfoVals = pairs.map((p) => p.a);
+    const niVals = pairs.map((p) => p.b);
     if (cfoVals.length >= 3 && niVals.length >= 3) {
       const allMeaningful = niVals.every((v) => v !== null && v > 0);
       if (!allMeaningful) {
         cfItems.push(
           makeItem(
-            'CFO / Net Income (Cash Conversion)',
+            'CFO / Net Income (Cash Conversion, Multi-year)',
             'Not meaningful: Net Income ≤ 0 in one or more periods',
             [],
             'neutral',
@@ -2811,7 +4240,7 @@ export function analyze(data, profile = 'default', options = {}) {
         const avgRatio = avg(ratioVals);
         cfItems.push(
           makeItem(
-            'CFO / Net Income (Cash Conversion)',
+            'CFO / Net Income (Cash Conversion, Multi-year)',
             `Average: ${avgRatio?.toFixed(0)}%`,
             ratioVals,
             avgRatio > 100 ? 'bull' : avgRatio > 75 ? 'neutral' : 'bear',
@@ -2836,11 +4265,10 @@ export function analyze(data, profile = 'default', options = {}) {
     'CapEx'
   );
   if (capexRow && cfoRow) {
-    const capVals = getRecentValues(capexRow, 6);
-    const cfoVals = getRecentValues(cfoRow, 6);
-    if (capVals.length >= 2 && cfoVals.length >= 2) {
-      const ratioVals = capVals
-        .map((v, i) => (cfoVals[i] ? (Math.abs(v) / cfoVals[i]) * 100 : null))
+    const pairs = alignByDate(capexRow, cfoRow, 6);
+    if (pairs.length >= 2) {
+      const ratioVals = pairs
+        .map((p) => (p.b ? (Math.abs(p.a) / p.b) * 100 : null))
         .filter((v) => v !== null);
       const latestR = ratioVals[ratioVals.length - 1];
       cfItems.push(
@@ -2968,16 +4396,7 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   if (cfItems.length) {
-    const bullCount = cfItems.filter((i) => i.signal === 'bull').length;
-    const bearCount = cfItems.filter((i) => i.signal === 'bear').length;
-    const grade =
-      bullCount >= 4
-        ? 'excellent'
-        : bullCount >= 2
-          ? 'good'
-          : bearCount >= 3
-            ? 'poor'
-            : 'average';
+    const grade = sectionGrade(cfItems);
     results.scores.cashflow = grade;
     results.sections.push({
       id: 'cashflow',
@@ -3001,7 +4420,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (assetTurnRow) {
     const vals = getRecentValues(assetTurnRow, 6);
     const latest = vals[vals.length - 1];
-    if (latest !== null) {
+    if (latest != null) {
       effItems.push(
         makeItem(
           'Asset Turnover',
@@ -3028,7 +4447,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (recTurnRow) {
     const vals = getRecentValues(recTurnRow, 6);
     const latest = vals[vals.length - 1];
-    if (latest !== null) {
+    if (latest != null) {
       effItems.push(
         makeItem(
           'Receivables Turnover',
@@ -3056,7 +4475,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (invTurnRow) {
     const vals = getRecentValues(invTurnRow, 6);
     const latest = vals[vals.length - 1];
-    if (latest !== null) {
+    if (latest != null) {
       effItems.push(
         makeItem(
           'Inventory Turnover',
@@ -3085,7 +4504,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (cccRow) {
     const vals = getRecentValues(cccRow, 6);
     const latest = vals[vals.length - 1];
-    if (latest !== null) {
+    if (latest != null) {
       effItems.push(
         makeItem(
           'Cash Conversion Cycle',
@@ -3114,7 +4533,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (dsoRow) {
     const vals = getRecentValues(dsoRow, 6);
     const latest = vals[vals.length - 1];
-    if (latest !== null) {
+    if (latest != null) {
       effItems.push(
         makeItem(
           'Days Sales Outstanding (DSO)',
@@ -3133,6 +4552,106 @@ export function analyze(data, profile = 'default', options = {}) {
     }
   }
 
+  const dpoRow = findRowAny(
+    ratios,
+    'Promedio Días a pagar pendientes',
+    'Days Payable Outstanding',
+    'DPO'
+  );
+  if (dpoRow) {
+    const vals = getRecentValues(dpoRow, 6);
+    const latest = vals[vals.length - 1];
+    if (latest != null) {
+      effItems.push(
+        makeItem(
+          'Days Payable Outstanding (DPO)',
+          `Latest: ${latest?.toFixed(0)} days`,
+          vals,
+          latest > 60 ? 'bull' : latest > 35 ? 'neutral' : 'bear',
+          latest > 75 ? 'Strong supplier float (supplier financing)' : latest > 35 ? 'Normal' : 'Low payables float'
+        )
+      );
+    }
+  }
+
+  const fixedAssetsTurnoverRow = findRowAny(
+    ratios,
+    'Rotación de activo fijo',
+    'Fixed Assets Turnover'
+  );
+  if (fixedAssetsTurnoverRow) {
+    const vals = getRecentValues(fixedAssetsTurnoverRow, 6);
+    const latest = vals[vals.length - 1];
+    const trend = getTrend(vals);
+    if (latest != null) {
+      effItems.push(
+        makeItem(
+          'Fixed Assets Turnover',
+          `Latest: ${latest?.toFixed(2)}x — Trend: ${trend}`,
+          vals,
+          latest > 4 ? 'bull' : latest > 2 ? 'neutral' : 'bear',
+          latest > 6 ? 'Very Efficient' : latest > 4 ? 'Efficient' : latest > 2 ? 'Moderate' : 'Underutilized'
+        )
+      );
+    }
+  }
+
+  const wcTurnoverRow = findRowAny(
+    ratios,
+    'Rotación del capital circulante',
+    'Working Capital Turnover'
+  );
+  if (wcTurnoverRow) {
+    const vals = getRecentValues(wcTurnoverRow, 6);
+    const latest = vals[vals.length - 1];
+    if (latest != null) {
+      const cccLatest = getLatest(cccRow);
+      const isNegativeWcModel = latest < 0 && cccLatest !== null && cccLatest < 0;
+      effItems.push(
+        makeItem(
+          'Working Capital Turnover',
+          `Latest: ${latest?.toFixed(2)}x`,
+          vals,
+          isNegativeWcModel
+            ? 'neutral'
+            : latest > 8
+              ? 'bull'
+              : latest > 3
+                ? 'neutral'
+                : 'bear',
+          isNegativeWcModel
+            ? 'Negative WC model (read with CCC)'
+            : latest > 8
+              ? 'High Throughput'
+              : latest > 3
+                ? 'Adequate'
+                : 'Heavy Working Capital'
+        )
+      );
+    }
+  }
+
+  const cfoToCurrentLiabRow = findRowAny(
+    ratios,
+    'Flujo de caja operativo a pasivo corriente',
+    'Operating Cash Flow to Current Liabilities'
+  );
+  if (cfoToCurrentLiabRow) {
+    const vals = getRecentValues(cfoToCurrentLiabRow, 6);
+    const latest = vals[vals.length - 1];
+    if (latest != null) {
+      effItems.push(
+        makeItem(
+          'Operating Cash Flow / Current Liabilities',
+          `Latest: ${latest?.toFixed(2)}x`,
+          vals,
+          latest > 1 ? 'bull' : latest > 0.6 ? 'neutral' : 'bear',
+          latest > 1 ? 'Self-funded Current Liabilities' : latest > 0.6 ? 'Acceptable' : 'Thin Coverage'
+        )
+      );
+    }
+  }
+
   const salesEmpRow = findRowAny(
     ratios,
     'Sales Per Employee',
@@ -3142,7 +4661,7 @@ export function analyze(data, profile = 'default', options = {}) {
     const vals = getRecentValues(salesEmpRow, 6);
     const latest = vals[vals.length - 1];
     const trend = getTrend(vals);
-    if (latest !== null) {
+    if (latest != null) {
       effItems.push(
         makeItem(
           'Revenue Per Employee',
@@ -3163,7 +4682,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (fcfCfoRow) {
     const vals = getRecentValues(fcfCfoRow, 6);
     const latest = vals[vals.length - 1];
-    if (latest !== null) {
+    if (latest != null) {
       effItems.push(
         makeItem(
           'FCF / CFO (Capital Efficiency)',
@@ -3183,15 +4702,7 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   if (effItems.length) {
-    const bullCount = effItems.filter((i) => i.signal === 'bull').length;
-    const grade =
-      bullCount >= 3
-        ? 'excellent'
-        : bullCount >= 2
-          ? 'good'
-          : bullCount >= 1
-            ? 'average'
-            : 'poor';
+    const grade = sectionGrade(effItems);
     results.scores.efficiency = grade;
     results.sections.push({
       id: 'efficiency',
@@ -3213,31 +4724,63 @@ export function analyze(data, profile = 'default', options = {}) {
   const evRow = findRowAny(
     vmOrIS,
     'Valor total de la empresa',
+    'Valor empresarial total',
     'Total Enterprise Value',
     'Enterprise Value',
     'TEV'
   );
+  const mcLatestForValidation = getLatest(mcRow);
+  const evLatestForValidation = getLatest(evRow);
+  const evIsValid =
+    mcLatestForValidation !== null &&
+    evLatestForValidation !== null &&
+    mcLatestForValidation > 0 &&
+    evLatestForValidation > 0;
   if (mcRow && evRow) {
     const mc = getLatest(mcRow);
     const ev = getLatest(evRow);
-    if (mc && ev) {
-      const evPremium = (ev / mc - 1) * 100;
-      valItems.push(
-        makeItem(
-          'Enterprise Value vs Market Cap',
-          `MC: $${(mc / 1000).toFixed(1)}B | EV: $${(ev / 1000).toFixed(1)}B (${evPremium > 0 ? '+' : ''}${evPremium.toFixed(0)}%)`,
-          [],
-          evPremium < 5 ? 'bull' : evPremium < 20 ? 'neutral' : 'bear',
-          evPremium < 0
-            ? 'Net Cash (EV < MC)'
-            : evPremium < 5
-              ? 'Minimal Debt'
-              : evPremium < 20
-                ? 'Some Debt'
-                : 'Debt-heavy EV',
-          'EV > MC by a large margin = significant net debt'
-        )
-      );
+    if (mc !== null && ev !== null) {
+      if (mc <= 0 || ev <= 0) {
+        valItems.push(
+          makeItem(
+            'Enterprise Value vs Market Cap',
+            `MC: $${(mc / 1000).toFixed(1)}B | EV: $${(ev / 1000).toFixed(1)}B`,
+            [],
+            'info',
+            'Invalid valuation datapoint ⚠️',
+            'MC/EV at or below zero suggests extraction, mapping, or unit issues. Signal omitted.'
+          )
+        );
+      } else {
+        const evPremium = (ev / mc - 1) * 100;
+        const evInvalid = ev <= 0 || ev < mc * 0.2 || !Number.isFinite(evPremium);
+        valItems.push(
+          makeItem(
+            'Enterprise Value vs Market Cap',
+            `MC: $${(mc / 1000).toFixed(1)}B | EV: $${(ev / 1000).toFixed(1)}B (${evPremium > 0 ? '+' : ''}${evPremium.toFixed(0)}%)`,
+            [],
+            evInvalid
+              ? 'neutral'
+              : evPremium < 5
+                ? 'bull'
+                : evPremium < 20
+                  ? 'neutral'
+                  : 'bear',
+            evInvalid
+              ? '⚠️ Data invalid'
+              : evPremium < 0
+                ? 'Net Cash (EV < MC)'
+                : evPremium < 5
+                  ? 'Minimal Debt'
+                  : evPremium < 20
+                    ? 'Some Debt'
+                    : 'Debt-heavy EV',
+            evInvalid
+              ? 'EV sanity check failed (EV<=0 or EV<20% of Market Cap). Metric excluded from scoring.'
+              : 'EV > MC by a large margin = significant net debt'
+          )
+        );
+      }
     }
   }
 
@@ -3247,6 +4790,37 @@ export function analyze(data, profile = 'default', options = {}) {
     'NTM P/E',
     'Forward P/E'
   );
+
+  const evRevenueNtmRow = findRowAny(
+    vm,
+    'NTM EV / Revenues',
+    'Valor de empresa / ingresos totales de la empresa NTM'
+  );
+  if (!evIsValid && evRevenueNtmRow) {
+    valItems.push(
+      makeItem(
+        'EV / Revenues (NTM)',
+        'N/A',
+        [],
+        'info',
+        'N/A due to invalid EV/MC ⚠️',
+        'EV-based multiple disabled because EV/Market Cap input is invalid.'
+      )
+    );
+  }
+  if (evIsValid && evRevenueNtmRow) {
+    const vals = getRecentValues(evRevenueNtmRow, 8);
+    const latest = vals[vals.length - 1];
+    valItems.push(
+      makeItem(
+        'EV / Revenues (NTM)',
+        `Latest: ${latest?.toFixed(2)}x`,
+        vals,
+        latest < 5 ? 'bull' : latest < 10 ? 'neutral' : 'bear',
+        latest < 5 ? 'Reasonable' : latest < 10 ? 'Growth Premium' : 'Rich'
+      )
+    );
+  }
   if (peRow) {
     const vals = getRecentValues(peRow, 8);
     const latest = vals[vals.length - 1];
@@ -3324,7 +4898,19 @@ export function analyze(data, profile = 'default', options = {}) {
     'NTM Total Enterprise Value / EBITDA',
     'EV/EBITDA'
   );
-  if (evEbitdaRow) {
+  if (!evIsValid && evEbitdaRow) {
+    valItems.push(
+      makeItem(
+        'EV/EBITDA (NTM)',
+        'N/A',
+        [],
+        'info',
+        'N/A due to invalid EV/MC ⚠️',
+        'EV-based multiple disabled because EV/Market Cap input is invalid.'
+      )
+    );
+  }
+  if (evIsValid && evEbitdaRow) {
     const vals = getRecentValues(evEbitdaRow, 8);
     const latest = vals[vals.length - 1];
     const avgVal = avg(vals);
@@ -3356,7 +4942,19 @@ export function analyze(data, profile = 'default', options = {}) {
     'EV/EBIT',
     'TEV / EBIT'
   );
-  if (evEbitRow) {
+  if (!evIsValid && evEbitRow) {
+    valItems.push(
+      makeItem(
+        'EV/EBIT',
+        'N/A',
+        [],
+        'info',
+        'N/A due to invalid EV/MC ⚠️',
+        'EV-based multiple disabled because EV/Market Cap input is invalid.'
+      )
+    );
+  }
+  if (evIsValid && evEbitRow) {
     const vals = getRecentValues(evEbitRow, 8);
     const latest = vals[vals.length - 1];
     valItems.push(
@@ -3398,6 +4996,99 @@ export function analyze(data, profile = 'default', options = {}) {
     );
   }
 
+  const mcapFcfNtmRow = findRowAny(
+    vm,
+    'NTM Market Cap / Free Cash Flow'
+  );
+  if (mcapFcfNtmRow) {
+    const vals = getRecentValues(mcapFcfNtmRow, 8);
+    const latest = vals[vals.length - 1];
+    valItems.push(
+      makeItem(
+        'Market Cap / Free Cash Flow (NTM)',
+        `Latest: ${latest?.toFixed(1)}x`,
+        vals,
+        latest < 20 ? 'bull' : latest < 35 ? 'neutral' : 'bear',
+        latest < 20 ? 'Attractive' : latest < 35 ? 'Fair' : 'Demanding'
+      )
+    );
+  }
+
+  const ltmEvRevenueRow = findRowAny(
+    vm,
+    'Valor / ingresos totales de la empresa de LTM',
+    'LTM EV / Revenues'
+  );
+  const ltmEvGpRow = findRowAny(
+    vm,
+    'LTM Total Enterprise Value / Gross Profit'
+  );
+  const ltmEvEbitdaRow = findRowAny(vm, 'LTM Total Enterprise Value / EBITDA');
+  const ltmEvEbitRow = findRowAny(vm, 'LTM Total Enterprise Value / EBIT');
+  const ltmEvUfcfRow = findRowAny(
+    vm,
+    'Valor empresarial total de LTM / Flujo de caja libre sin apalancamiento',
+    'LTM EV / Unlevered Free Cash Flow'
+  );
+  const ltmMcapLfcfRow = findRowAny(
+    vm,
+    'Capitalización de mercado LTM / Flujo de caja libre apalancado',
+    'LTM Market Cap / Levered Free Cash Flow'
+  );
+  const pNcavRow = findRowAny(vm, 'LTM Price / Net Current Asset Value', 'P/NCAV');
+
+  [
+    ['EV / Revenues (LTM)', ltmEvRevenueRow],
+    ['EV / Gross Profit (LTM)', ltmEvGpRow],
+    ['EV / EBITDA (LTM)', ltmEvEbitdaRow],
+    ['EV / EBIT (LTM)', ltmEvEbitRow],
+    ['EV / Unlevered FCF (LTM)', ltmEvUfcfRow],
+    ['Market Cap / Levered FCF (LTM)', ltmMcapLfcfRow],
+    ['Price / NCAV (LTM)', pNcavRow]
+  ].forEach(([name, row]) => {
+    if (!row) return;
+    const vals = getRecentValues(row, 8);
+    const latest = vals[vals.length - 1];
+    if (latest === null || latest === undefined) return;
+    const isNcavMetric = String(name) === 'Price / NCAV (LTM)';
+    const isEvMultiple = String(name).startsWith('EV / ');
+    if (isEvMultiple && !evIsValid) {
+      valItems.push(
+        makeItem(
+          String(name),
+          'N/A',
+          [],
+          'info',
+          'N/A due to invalid EV/MC ⚠️',
+          'EV-based multiple disabled because EV/Market Cap input is invalid.'
+        )
+      );
+      return;
+    }
+    if (isNcavMetric && latest <= 0) {
+      valItems.push(
+        makeItem(
+          String(name),
+          `Latest: ${latest?.toFixed(2)}x`,
+          vals,
+          'info',
+          'NCAV not interpretable ⚠️',
+          'NCAV is zero/negative, so this multiple is not interpretable and no valuation signal is applied.'
+        )
+      );
+      return;
+    }
+    valItems.push(
+      makeItem(
+        String(name),
+        `Latest: ${latest?.toFixed(2)}x`,
+        vals,
+        latest < 15 ? 'bull' : latest < 30 ? 'neutral' : 'bear',
+        latest < 15 ? 'Attractive' : latest < 30 ? 'Fair' : 'Expensive'
+      )
+    );
+  });
+
   const fcfYieldRow = findRowAny(
     vm,
     'Levered Free Cash Flow Yield',
@@ -3432,20 +5123,32 @@ export function analyze(data, profile = 'default', options = {}) {
   if (divYieldRow) {
     const vals = getRecentValues(divYieldRow, 6);
     const latest = vals[vals.length - 1];
-    if (latest !== null && latest > 0) {
+    if (latest != null && latest > 0) {
+      const divPaidLatest = Math.abs(
+        getLatest(findRowAny(cf, 'Dividendos pagados', 'Dividends Paid')) || 0
+      );
+      const divMismatch = latest > 0 && divPaidLatest === 0;
       valItems.push(
         makeItem(
           'Dividend Yield',
-          `Latest: ${latest.toFixed(2)}%`,
+          `Latest: ${latest.toFixed(2)}%${divMismatch ? ' | ⚠️ Cash dividends: $0M (source/period mismatch)' : ''}`,
           vals,
-          latest > 2 ? 'bull' : latest > 0.5 ? 'neutral' : 'neutral',
-          latest > 3
-            ? 'High Yield'
+          divMismatch
+            ? 'neutral'
             : latest > 2
-              ? 'Good Yield'
+              ? 'bull'
               : latest > 0.5
-                ? 'Modest'
-                : 'Token Dividend'
+                ? 'neutral'
+                : 'neutral',
+          divMismatch
+            ? '⚠️ Yield mismatch'
+            : latest > 3
+              ? 'High Yield'
+              : latest > 2
+                ? 'Good Yield'
+                : latest > 0.5
+                  ? 'Modest'
+                  : 'Token Dividend'
         )
       );
     }
@@ -3455,7 +5158,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (pegRow) {
     const vals = getRecentValues(pegRow, 4);
     const latest = vals[vals.length - 1];
-    if (latest !== null) {
+    if (latest != null) {
       valItems.push(
         makeItem(
           'PEG Ratio',
@@ -3487,16 +5190,7 @@ export function analyze(data, profile = 'default', options = {}) {
   );
 
   if (valItems.length) {
-    const bullCount = valItems.filter((i) => i.signal === 'bull').length;
-    const bearCount = valItems.filter((i) => i.signal === 'bear').length;
-    const grade =
-      bullCount >= 4
-        ? 'excellent'
-        : bullCount >= 2
-          ? 'good'
-          : bearCount >= 4
-            ? 'poor'
-            : 'average';
+    const grade = sectionGrade(valItems);
     results.scores.valuation = grade;
     results.sections.push({
       id: 'valuation',
@@ -3523,7 +5217,7 @@ export function analyze(data, profile = 'default', options = {}) {
     const vals = getRecentValues(dpsRow, 8);
     const latest = vals[vals.length - 1];
     const first = vals[0];
-    if (latest !== null && latest > 0) {
+    if (latest != null && latest > 0) {
       const gr = cagr(first, latest, vals.length - 1);
       const neverCut = vals.every((v, i) => i === 0 || v >= vals[i - 1]);
       shItems.push(
@@ -3548,7 +5242,7 @@ export function analyze(data, profile = 'default', options = {}) {
   if (payoutRow) {
     const vals = getRecentValues(payoutRow, 6);
     const latest = vals[vals.length - 1];
-    if (latest !== null && latest > 0) {
+    if (latest != null && latest > 0) {
       shItems.push(
         makeItem(
           'Payout Ratio',
@@ -3682,18 +5376,23 @@ export function analyze(data, profile = 'default', options = {}) {
     if (mc && mc > 0) {
       const totalYield = ((bb + div) / mc) * 100;
       if (totalYield > 0.5) {
+        const extremeYield = totalYield > 300;
         shItems.push(
           makeItem(
             'Total Shareholder Yield',
             `${totalYield.toFixed(1)}% (Buybacks: $${bb.toFixed(0)}M + Dividends: $${div.toFixed(0)}M)`,
             [],
-            totalYield > 5 ? 'bull' : totalYield > 2 ? 'neutral' : 'neutral',
-            totalYield > 5
-              ? 'Excellent Capital Return'
-              : totalYield > 2
-                ? 'Good'
-                : 'Modest',
-            'Buybacks + dividends as % of market cap'
+            extremeYield ? 'info' : totalYield > 5 ? 'bull' : 'neutral',
+            extremeYield
+              ? 'Invalid shareholder return datapoint ⚠️'
+              : totalYield > 5
+                ? 'Excellent Capital Return'
+                : totalYield > 2
+                  ? 'Good'
+                  : 'Modest',
+            extremeYield
+              ? 'Likely scaling/formula issue (market cap or units). Signal omitted.'
+              : 'Buybacks + dividends as % of market cap'
           )
         );
       }
@@ -3701,15 +5400,7 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   if (shItems.length) {
-    const bullCount = shItems.filter((i) => i.signal === 'bull').length;
-    const grade =
-      bullCount >= 3
-        ? 'excellent'
-        : bullCount >= 2
-          ? 'good'
-          : bullCount >= 1
-            ? 'average'
-            : 'poor';
+    const grade = sectionGrade(shItems);
     results.scores.shareholder = grade;
     results.sections.push({
       id: 'shareholder',
@@ -3849,10 +5540,31 @@ export function analyze(data, profile = 'default', options = {}) {
     // High vs Low targets
     const highRow = findRowAny(
       apt,
+      'Precio de acción objetivo máximo',
       'Precio objetivo alto',
       'High Price Target'
     );
-    const lowRow = findRowAny(apt, 'Precio objetivo bajo', 'Low Price Target');
+    const lowRow = findRowAny(
+      apt,
+      'Precio de acción objetivo mínimo',
+      'Precio objetivo bajo',
+      'Low Price Target'
+    );
+    const medianRow = findRowAny(
+      apt,
+      'Mediana de precio de acción objetivo',
+      'Median Price Target'
+    );
+    const estimateCountRow = findRowAny(
+      apt,
+      'Precio de acción objetivo (# est.)',
+      '# Estimates'
+    );
+    const targetToPriceRow = findRowAny(
+      apt,
+      'Precio de acción objetivo / Precio de cierre',
+      'Target / Price'
+    );
     if (highRow && lowRow) {
       const high = getLatest(highRow);
       const low = getLatest(lowRow);
@@ -3869,6 +5581,51 @@ export function analyze(data, profile = 'default', options = {}) {
               : spread < 100
                 ? 'Moderate Spread'
                 : 'Wide Disagreement'
+          )
+        );
+      }
+    }
+
+    if (medianRow) {
+      const median = getLatest(medianRow);
+      if (median) {
+        analystItems.push(
+          makeItem(
+            'Median Price Target',
+            `Latest median target: $${median.toFixed(0)}`,
+            getRecentValues(medianRow, 6),
+            'info',
+            'Reference'
+          )
+        );
+      }
+    }
+
+    if (estimateCountRow) {
+      const estCount = getLatest(estimateCountRow);
+      if (estCount) {
+        analystItems.push(
+          makeItem(
+            'Target Coverage (# Estimates)',
+            `Latest coverage: ${estCount.toFixed(0)} analysts`,
+            getRecentValues(estimateCountRow, 6),
+            estCount >= 20 ? 'bull' : estCount >= 10 ? 'neutral' : 'neutral',
+            estCount >= 20 ? 'Well-covered' : estCount >= 10 ? 'Moderately covered' : 'Low coverage'
+          )
+        );
+      }
+    }
+
+    if (targetToPriceRow) {
+      const ratioPct = getLatest(targetToPriceRow);
+      if (ratioPct) {
+        analystItems.push(
+          makeItem(
+            'Target / Price (%)',
+            `Latest: ${ratioPct.toFixed(1)}%`,
+            getRecentValues(targetToPriceRow, 6),
+            ratioPct > 110 ? 'bull' : ratioPct > 95 ? 'neutral' : 'bear',
+            ratioPct > 110 ? 'Strong implied upside' : ratioPct > 95 ? 'Balanced' : 'Potential downside'
           )
         );
       }
@@ -3936,19 +5693,30 @@ export function analyze(data, profile = 'default', options = {}) {
   const epsY = yoyGrowth(epsVals).slice(-1)[0];
   const earnY = niY ?? epsY;
   if (Number.isFinite(revY) && Number.isFinite(earnY)) {
+    const gap = Math.abs(earnY - revY);
+    const severeMismatch = gap > 50;
+    const mildMismatch = gap > 30;
     const bearish = revY > 4 && earnY < -4;
     harmonyItems.push(
       makeItem(
         'Revenue vs Earnings Harmony',
-        `Revenue YoY ${revY.toFixed(1)}% vs Earnings YoY ${earnY.toFixed(1)}%`,
+        `Revenue YoY ${revY.toFixed(1)}% vs Earnings YoY ${earnY.toFixed(1)}% (gap: ${gap.toFixed(1)}pp)`,
         [revY, earnY],
-        bearish ? 'bear' : revY > 0 && earnY > 0 ? 'bull' : 'neutral',
-        bearish
+        bearish || severeMismatch
+          ? 'bear'
+          : mildMismatch
+            ? 'neutral'
+            : revY > 0 && earnY > 0
+              ? 'bull'
+              : 'neutral',
+        bearish || severeMismatch
           ? 'Growth-Profit Mismatch'
-          : revY > 0 && earnY > 0
-            ? 'Aligned Growth'
-            : 'Mixed',
-        'Revenue rising while NI/EPS falls can signal weak quality growth.',
+          : mildMismatch
+            ? 'Divergent growth'
+            : revY > 0 && earnY > 0
+              ? 'Aligned Growth'
+              : 'Mixed',
+        'Large gaps between revenue and earnings growth can indicate one-offs, tax effects, or non-recurring items.',
         { tip: METRIC_TIPS.harmony }
       )
     );
@@ -4012,7 +5780,7 @@ export function analyze(data, profile = 'default', options = {}) {
       const ratio = cfoL / niL;
       harmonyItems.push(
         makeItem(
-          'CFO vs Net Income (Accrual Risk)',
+          'CFO vs Net Income (Accrual Risk, LTM)',
           `CFO/NI: ${ratio.toFixed(2)}x`,
           [ratio],
           ratio < 0.75 ? 'bear' : ratio > 1 ? 'bull' : 'neutral',
@@ -4121,6 +5889,57 @@ export function analyze(data, profile = 'default', options = {}) {
       )
     );
   }
+
+  const currentPortionLtDebtRow = findRowAny(
+    bs,
+    'Current Portion of LT Debt',
+    'Current Portion of Long-Term Debt',
+    'Current Portion Long-Term Debt'
+  );
+  const ltDebtRowReality = findRowAny(bs, 'Long-Term Debt', 'Long Term Debt', 'Deuda a largo plazo');
+  if (currentPortionLtDebtRow && ltDebtRowReality) {
+    const cpLatest = getLatest(currentPortionLtDebtRow);
+    const ltLatest = getLatest(ltDebtRowReality);
+    if (
+      cpLatest !== null &&
+      ltLatest !== null &&
+      cpLatest > 0 &&
+      ltLatest > 0 &&
+      Math.abs(cpLatest - ltLatest) < Math.max(1, ltLatest * 0.005)
+    ) {
+      balanceItems.push(
+        makeItem(
+          'Debt Mapping Integrity Check',
+          `Current portion LT debt and Long-term debt are nearly identical (${cpLatest.toFixed(0)} vs ${ltLatest.toFixed(0)})`,
+          [cpLatest, ltLatest],
+          'info',
+          'Possible mapping issue ⚠️',
+          'Potential label/source mapping issue: short-term and long-term debt appear duplicated.'
+        )
+      );
+    }
+  }
+
+  const ndEbitdaRealityRow = findRowAny(ratios, 'Net Debt / EBITDA');
+  if (ndEbitdaRealityRow && debtL !== null) {
+    const ndEbitdaLatest = getLatest(ndEbitdaRealityRow);
+    if (ndEbitdaLatest !== null) {
+      const netDebt = debtL - (cashL + stInvL);
+      const signMismatch = (netDebt < 0 && ndEbitdaLatest > 0) || (netDebt > 0 && ndEbitdaLatest < 0);
+      if (signMismatch) {
+        balanceItems.push(
+          makeItem(
+            'Net Debt Consistency Check',
+            `Net Debt amount sign (${netDebt.toFixed(0)}) vs Net Debt/EBITDA sign (${ndEbitdaLatest.toFixed(2)}x)`,
+            [netDebt, ndEbitdaLatest],
+            'info',
+            'Definition mismatch ⚠️',
+            'Net debt sign conflict suggests inconsistent cash/debt definition or data mapping mismatch.'
+          )
+        );
+      }
+    }
+  }
   const arDays = findRowAny(
     ratios,
     'Days Sales Outstanding',
@@ -4147,14 +5966,24 @@ export function analyze(data, profile = 'default', options = {}) {
     const revYY = yoyGrowth(revVals).slice(-1)[0];
     if (Number.isFinite(invY) && Number.isFinite(revYY)) {
       const spread = invY - revYY;
+      const inventoryBuildRisk = spread > 10;
+      const deepDestock = invY < -10 && revYY >= 0;
       balanceItems.push(
         makeItem(
           'Inventory vs Revenue Growth',
           `Inventory YoY ${invY.toFixed(1)}% vs Revenue YoY ${revYY.toFixed(1)}% (Δ ${spread.toFixed(1)}pp)`,
           [invY, revYY],
-          spread > 12 ? 'bear' : 'neutral',
-          spread > 12 ? 'Build faster than sales' : 'In line',
-          'Inventory building much faster than sales can raise obsolescence/manipulation risk.'
+          inventoryBuildRisk ? 'bear' : deepDestock ? 'neutral' : 'neutral',
+          inventoryBuildRisk
+            ? 'Build faster than sales'
+            : deepDestock
+              ? 'Destocking / efficiency reset'
+              : 'In line',
+          inventoryBuildRisk
+            ? 'Inventory building much faster than sales can raise obsolescence/manipulation risk.'
+            : deepDestock
+              ? 'Inventory is shrinking vs sales growth; may reflect destocking/efficiency gains—verify service levels and demand resilience.'
+              : 'Inventory and sales trends are broadly aligned.'
         )
       );
     }
@@ -4810,6 +6639,12 @@ export function populateIndustrySelector() {
     .join('');
   if (current) sel.value = current;
 }
+
+onLanguageChange(() => {
+  if (typeof populateIndustrySelector === 'function') populateIndustrySelector();
+  if (typeof updateToggleSectionsButton === 'function')
+    updateToggleSectionsButton();
+});
 
 export function getIndustrySelection() {
   const code = document.getElementById('industrySelect')?.value || '';

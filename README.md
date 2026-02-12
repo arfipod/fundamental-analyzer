@@ -123,6 +123,7 @@ Current focus:
 
 - High coverage on application/infrastructure logic and selected UI behavior (industry search, analyze flow, i18n hook behavior).
 - Legacy migrated modules (`scripts.js`, `locales.js`, `industry-data.js`) and type-only contracts (`types.ts`, `ports/*`) are intentionally not forced to 100% because they are either non-runtime or retained for compatibility.
+- **Single source of truth** for analyzer logic is `src/domain/metrics/scoring.ts`; any behavioral change should be implemented there first. `scripts.js` is kept only for legacy compatibility paths.
 
 Recommended CI gate:
 
