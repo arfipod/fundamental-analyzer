@@ -15,7 +15,7 @@ type MetricItem = {
   explanation?: string;
   signal?: string;
   signalText?: string;
-  values?: any;
+  values?: unknown;
 };
 
 type ResultSection = {
@@ -180,7 +180,7 @@ describe('renderDashboard trend bars', () => {
 
     expect(opLeverage).toBeTruthy();
     if (!opLeverage) throw new Error('Operating Leverage metric not found');
-    expect(opLeverage.values?.fullValues).toEqual([30, 31, null, 33]);
+    expect((opLeverage.values as { fullValues?: (number | null)[] } | undefined)?.fullValues).toEqual([30, 31, null, 33]);
 
     const html = renderDashboard(data, results, null);
     expect(html).toMatch(/Operating Leverage[\s\S]*?class="trend-bar"/);
