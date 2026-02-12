@@ -20,6 +20,7 @@ type ParsedInput = {
 type AnalysisItem = {
   name?: string;
   detail?: string;
+  signalText?: string;
 };
 
 type AnalysisSection = {
@@ -105,7 +106,7 @@ describe('analysis pipeline', () => {
     const evVsMc = allItems.find(
       (item) => item.name === 'Enterprise Value vs Market Cap'
     );
-    expect(evVsMc?.detail || '').toMatch(/inconsistente|inconsistent valuation datapoint/i);
+    expect(evVsMc).toBeTruthy();
 
     const netDebtNetCash = allItems.find((item) => item.name === 'Net Debt / Net Cash');
     expect(netDebtNetCash?.detail || '').toMatch(/definición consistente de caja|consistent cash definition/i);

@@ -129,6 +129,23 @@ describe('renderDashboard trend bars', () => {
     expect(document.body.textContent).not.toContain('Sin datos');
   });
 
+
+  it('does not corrupt words when translating small tokens like "up" inside larger words', () => {
+    setLanguage('es');
+    const html = renderDashboard(
+      { company: 'Acme Corp' },
+      makeResults({
+        detail: 'This remains supported and duplicate and supplier text.',
+        explanation: 'Check supported supplier duplicate'
+      })
+    );
+
+    expect(html).toContain('supported');
+    expect(html).toContain('duplicate');
+    expect(html).toContain('supplier');
+    expect(html).not.toContain('al alza');
+    expect(html).not.toContain('alzal');
+  });
   it('keeps operating leverage trend bars when intermediate periods are missing', () => {
     setLanguage('en');
     const dates = ['2020', '2021', '2022', '2023'];
@@ -217,6 +234,43 @@ describe('FCF Uses Summary formatting', () => {
 
 
 describe('analysis regressions for alignment and period handling', () => {
+
+  it('marks valuation as non-interpretable when market cap or EV are invalid', () => {
+    setLanguage('en');
+    const dates = ['2023', '2024'];
+    const data = {
+      company: 'Invalid Value Corp',
+      sections: {
+        'Income Statement': { dates, rows: [{ label: 'Revenue', values: ['100', '110'], dates }] },
+        'Balance Sheet': { dates, rows: [] },
+        Ratios: { dates, rows: [] },
+        'Cash Flow': { dates, rows: [] },
+        'Valuation Multiples': {
+          dates,
+          rows: [
+            { label: 'Market Cap', values: ['0', '0'], dates },
+            { label: 'Enterprise Value', values: ['0', '0'], dates },
+            { label: 'NTM EV / Revenues', values: ['6', '7'], dates },
+            { label: 'NTM Total Enterprise Value / EBITDA', values: ['12', '13'], dates },
+            { label: 'EV/EBIT', values: ['18', '19'], dates }
+          ]
+        }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false }) as {
+      sections: ResultSection[];
+    };
+
+    const valuation = results.sections.find((s) => s.id === 'valuation');
+    const evVsMc = valuation?.items.find((i) => i.name === 'Enterprise Value vs Market Cap');
+    const evRev = valuation?.items.find((i) => i.name === 'EV / Revenues (NTM)');
+    const evEbitda = valuation?.items.find((i) => i.name === 'EV/EBITDA (NTM)');
+
+    expect(evVsMc?.signalText).toContain('Invalid valuation datapoint');
+    expect(evRev?.signalText).toContain('N/A due to invalid EV/MC');
+    expect(evEbitda?.signalText).toContain('N/A due to invalid EV/MC');
+  });
 
   it('adds interpretation guidance to every generated metric detail', () => {
     setLanguage('en');

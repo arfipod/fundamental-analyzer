@@ -570,6 +570,15 @@ const FRAG_ENTRIES = Object.entries(DYNAMIC_I18N.fragments).sort(
 );
 const FRAG_ENTRIES_REVERSED = FRAG_ENTRIES.map(([en, es]) => [es, en]);
 
+function replaceBounded(text, from, to) {
+  if (!from) return text;
+  const escaped = escapeRegExp(from);
+  const hasAlphaNum = /[A-Za-z0-9]/.test(from);
+  if (!hasAlphaNum) return text.replaceAll(from, to);
+  const re = new RegExp(`(^|[^A-Za-z0-9_])(${escaped})(?=$|[^A-Za-z0-9_])`, 'g');
+  return text.replace(re, (_, lead) => `${lead}${to}`);
+}
+
 function localizeDynamicText(text) {
   if (!text) return text;
   let out = normalizeLabelText(String(text));
@@ -577,26 +586,25 @@ function localizeDynamicText(text) {
   const metricEntries =
     currentLang === 'es' ? METRIC_ENTRIES : METRIC_ENTRIES_REVERSED;
   metricEntries.forEach(([from, to]) => {
-    out = out.replaceAll(from, to);
+    out = replaceBounded(out, from, to);
   });
 
   const sectionEntries =
     currentLang === 'es' ? SECTION_ENTRIES : SECTION_ENTRIES_REVERSED;
   sectionEntries.forEach(([from, to]) => {
-    out = out.replaceAll(from, to);
+    out = replaceBounded(out, from, to);
   });
 
   const fragmentEntries =
     currentLang === 'es' ? FRAG_ENTRIES : FRAG_ENTRIES_REVERSED;
   fragmentEntries.forEach(([from, to]) => {
-    out = out.replaceAll(from, to);
+    out = replaceBounded(out, from, to);
   });
 
   const financialEntries =
     currentLang === 'es' ? FIN_LABEL_ENTRIES : FIN_LABEL_ENTRIES_REVERSED;
   financialEntries.forEach(([from, to]) => {
-    const re = new RegExp(escapeRegExp(from), 'g');
-    out = out.replace(re, to);
+    out = replaceBounded(out, from, to);
   });
 
   return out;
@@ -4334,6 +4342,18 @@ export function analyze(data, profile = 'default', options = {}) {
     'NTM EV / Revenues',
     'Valor de empresa / ingresos totales de la empresa NTM'
   );
+  if (!evIsValid && evRevenueNtmRow) {
+    valItems.push(
+      makeItem(
+        'EV / Revenues (NTM)',
+        'N/A',
+        [],
+        'info',
+        'N/A due to invalid EV/MC ⚠️',
+        'EV-based multiple disabled because EV/Market Cap input is invalid.'
+      )
+    );
+  }
   if (evIsValid && evRevenueNtmRow) {
     const vals = getRecentValues(evRevenueNtmRow, 8);
     const latest = vals[vals.length - 1];
@@ -4424,6 +4444,18 @@ export function analyze(data, profile = 'default', options = {}) {
     'NTM Total Enterprise Value / EBITDA',
     'EV/EBITDA'
   );
+  if (!evIsValid && evEbitdaRow) {
+    valItems.push(
+      makeItem(
+        'EV/EBITDA (NTM)',
+        'N/A',
+        [],
+        'info',
+        'N/A due to invalid EV/MC ⚠️',
+        'EV-based multiple disabled because EV/Market Cap input is invalid.'
+      )
+    );
+  }
   if (evIsValid && evEbitdaRow) {
     const vals = getRecentValues(evEbitdaRow, 8);
     const latest = vals[vals.length - 1];
@@ -4456,6 +4488,18 @@ export function analyze(data, profile = 'default', options = {}) {
     'EV/EBIT',
     'TEV / EBIT'
   );
+  if (!evIsValid && evEbitRow) {
+    valItems.push(
+      makeItem(
+        'EV/EBIT',
+        'N/A',
+        [],
+        'info',
+        'N/A due to invalid EV/MC ⚠️',
+        'EV-based multiple disabled because EV/Market Cap input is invalid.'
+      )
+    );
+  }
   if (evIsValid && evEbitRow) {
     const vals = getRecentValues(evEbitRow, 8);
     const latest = vals[vals.length - 1];
