@@ -2704,6 +2704,79 @@ export function analyze(data, profile = 'default', options = {}) {
     );
   }
 
+  function resolveMarketCapLatest() {
+    const directMcRow =
+      findRowExact(
+        vm || is,
+        'Market Cap (MM)',
+        'Market Cap',
+        'Capitalización bursátil'
+      ) ||
+      findRowAny(vm || is, ['Market Cap', 'MM'], 'Capitalización bursátil', 'Market Cap');
+    const directMc = getLatest(directMcRow);
+    if (directMc !== null && directMc > 0) {
+      return { marketCap: directMc, source: 'reported' as const };
+    }
+
+    const sharesRow =
+      findRowExact(
+        bs,
+        'Total Shares Out. on Filing Date',
+        'Total Shares Outstanding on Filing Date'
+      ) ||
+      findRowAny(
+        bs,
+        ['Total Shares Out', 'Filing Date'],
+        ['Shares Outstanding', 'Filing Date']
+      );
+    const sharesOutstandingM = getLatest(sharesRow);
+    const price = Number.isFinite(data.priceNum) ? data.priceNum : null;
+
+    if (
+      sharesOutstandingM !== null &&
+      sharesOutstandingM > 0 &&
+      price !== null &&
+      price > 0
+    ) {
+      return {
+        marketCap: sharesOutstandingM * price,
+        source: 'derived_from_price_x_shares' as const
+      };
+    }
+
+    return {
+      marketCap: directMc,
+      source: 'invalid' as const
+    };
+  }
+
+  function resolveEnterpriseValueLatest() {
+    const evRow =
+      findRowExact(
+        vm || is,
+        'Total Enterprise Value (MM)',
+        'Total Enterprise Value',
+        'Enterprise Value',
+        'TEV',
+        'Valor total de la empresa',
+        'Valor empresarial total'
+      ) ||
+      findRowAny(
+        vm || is,
+        ['Total Enterprise Value', 'MM'],
+        'Valor total de la empresa',
+        'Valor empresarial total',
+        'Total Enterprise Value',
+        'Enterprise Value',
+        'TEV'
+      );
+
+    return {
+      enterpriseValue: getLatest(evRow),
+      row: evRow
+    };
+  }
+
   function sumLatestRows(section, ...keywordSets) {
     if (!section) return null;
     const rows = [];
@@ -4890,31 +4963,25 @@ export function analyze(data, profile = 'default', options = {}) {
 
   // Market Cap & EV
   const vmOrIS = vm || is;
-  const mcRow = findRowAny(vmOrIS, 'Capitalización bursátil', 'Market Cap');
-  const evRow = findRowAny(
-    vmOrIS,
-    'Valor total de la empresa',
-    'Valor empresarial total',
-    'Total Enterprise Value',
-    'Enterprise Value',
-    'TEV'
-  );
-  const mcLatestForValidation = getLatest(mcRow);
-  const evLatestForValidation = getLatest(evRow);
+  const evResolution = resolveEnterpriseValueLatest();
+  const evRow = evResolution.row;
+  const mcResolution = resolveMarketCapLatest();
+  const mcLatestForValidation = mcResolution.marketCap;
+  const evLatestForValidation = evResolution.enterpriseValue;
   const evIsValid =
     mcLatestForValidation !== null &&
     evLatestForValidation !== null &&
     mcLatestForValidation > 0 &&
     evLatestForValidation > 0;
-  if (mcRow && evRow) {
-    const mc = getLatest(mcRow);
-    const ev = getLatest(evRow);
+  if (mcLatestForValidation !== null && evRow) {
+    const mc = mcLatestForValidation;
+    const ev = evLatestForValidation;
     if (mc !== null && ev !== null) {
       if (mc <= 0 || ev <= 0) {
         valItems.push(
           makeItem(
             'Enterprise Value vs Market Cap',
-            `MC: $${(mc / 1000).toFixed(1)}B | EV: $${(ev / 1000).toFixed(1)}B`,
+            `MC: $${(mc / 1000).toFixed(1)}B | EV: $${(ev / 1000).toFixed(1)}B${mcResolution.source === 'derived_from_price_x_shares' ? ' (MC from price × shares)' : ''}`,
             [],
             'info',
             'Invalid valuation datapoint ⚠️',
@@ -4927,7 +4994,7 @@ export function analyze(data, profile = 'default', options = {}) {
         valItems.push(
           makeItem(
             'Enterprise Value vs Market Cap',
-            `MC: $${(mc / 1000).toFixed(1)}B | EV: $${(ev / 1000).toFixed(1)}B (${evPremium > 0 ? '+' : ''}${evPremium.toFixed(0)}%)`,
+            `MC: $${(mc / 1000).toFixed(1)}B | EV: $${(ev / 1000).toFixed(1)}B (${evPremium > 0 ? '+' : ''}${evPremium.toFixed(0)}%)${mcResolution.source === 'derived_from_price_x_shares' ? ' | MC from price × shares' : ''}`,
             [],
             evInvalid
               ? 'neutral'
@@ -5539,8 +5606,8 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   // Total shareholder yield = buybacks + dividends / market cap
-  if ((buybackRow || divPaidRow) && mcRow) {
-    const mc = getLatest(mcRow);
+  if (buybackRow || divPaidRow) {
+    const mc = mcResolution.marketCap;
     const bb = buybackRow ? Math.abs(getLatest(buybackRow) || 0) : 0;
     const div = divPaidRow ? Math.abs(getLatest(divPaidRow) || 0) : 0;
     if (mc && mc > 0) {
@@ -5550,7 +5617,7 @@ export function analyze(data, profile = 'default', options = {}) {
         shItems.push(
           makeItem(
             'Total Shareholder Yield',
-            `${totalYield.toFixed(1)}% (Buybacks: $${bb.toFixed(0)}M + Dividends: $${div.toFixed(0)}M)`,
+            `${totalYield.toFixed(1)}% (Buybacks: $${bb.toFixed(0)}M + Dividends: $${div.toFixed(0)}M)${mcResolution.source === 'derived_from_price_x_shares' ? ' | MC from price × shares' : ''}`,
             [],
             extremeYield ? 'info' : totalYield > 5 ? 'bull' : 'neutral',
             extremeYield
@@ -6028,11 +6095,18 @@ export function analyze(data, profile = 'default', options = {}) {
     ['Deuda', 'corto']
   );
   const cfoLatest = getLatest(cfoRowCore);
+  const ltInvCore = findRowAny(
+    bs,
+    'Long-Term Investments',
+    'Long Term Investments',
+    'Inversiones a largo plazo'
+  );
   const debtL = getLatest(debtRow),
     cashL = getLatest(cashRowCore) || 0,
-    stInvL = getLatest(stInvCore2) || 0;
+    stInvL = getLatest(stInvCore2) || 0,
+    ltInvL = getLatest(ltInvCore) || 0;
   if (debtL !== null) {
-    const netDebt = debtL - (cashL + stInvL);
+    const netDebt = debtL - (cashL + stInvL + ltInvL);
     balanceItems.push(
       makeItem(
         'Net Debt / Net Cash',
@@ -6060,13 +6134,25 @@ export function analyze(data, profile = 'default', options = {}) {
     );
   }
 
-  const currentPortionLtDebtRow = findRowAny(
+  const currentPortionLtDebtRow =
+    findRowExact(
+      bs,
+      'Current Portion of LT Debt',
+      'Current Portion of Long-Term Debt',
+      'Current Portion Long-Term Debt'
+    ) ||
+    findRowAny(
+      bs,
+      'Current Portion of LT Debt',
+      'Current Portion of Long-Term Debt',
+      'Current Portion Long-Term Debt'
+    );
+  const ltDebtRowReality = findRowExact(
     bs,
-    'Current Portion of LT Debt',
-    'Current Portion of Long-Term Debt',
-    'Current Portion Long-Term Debt'
+    'Long-Term Debt',
+    'Long Term Debt',
+    'Deuda a largo plazo'
   );
-  const ltDebtRowReality = findRowAny(bs, 'Long-Term Debt', 'Long Term Debt', 'Deuda a largo plazo');
   if (currentPortionLtDebtRow && ltDebtRowReality) {
     const cpLatest = getLatest(currentPortionLtDebtRow);
     const ltLatest = getLatest(ltDebtRowReality);
@@ -6091,10 +6177,11 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   const ndEbitdaRealityRow = findRowAny(ratios, 'Net Debt / EBITDA');
+  const netDebtRowReality = findRowAny(bs, 'Net Debt');
   if (ndEbitdaRealityRow && debtL !== null) {
     const ndEbitdaLatest = getLatest(ndEbitdaRealityRow);
     if (ndEbitdaLatest !== null) {
-      const netDebt = debtL - (cashL + stInvL);
+      const netDebt = getLatest(netDebtRowReality) ?? debtL - (cashL + stInvL + ltInvL);
       const signMismatch = (netDebt < 0 && ndEbitdaLatest > 0) || (netDebt > 0 && ndEbitdaLatest < 0);
       if (signMismatch) {
         balanceItems.push(
