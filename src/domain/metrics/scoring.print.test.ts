@@ -50,10 +50,12 @@ describe('printable dashboard', () => {
 
     expect(html).toContain('data-panel="print"');
     expect(html).toContain('Quick summary');
-    expect(html).toContain('Revenue Growth (CAGR)');
-    expect(html).toContain('Revenue is compounding over the observed period');
-    expect(html).toContain('FY22: 9.8 % · FY23: 11.1 % · FY24: 12.5 %');
-    expect(html).toContain('Signal:</strong> 🟢 Positive · Acceleration is healthy');
+    expect(html).toContain('class="print-metric"');
+    expect(html).toContain('class="print-title">Revenue Growth (CAGR)');
+    expect(html).toContain('class="print-headline">Revenue is compounding over the observed period');
+    expect(html).toContain('<ul class="print-bullets">');
+    expect(html).toContain('<strong>Data:</strong> FY22: 9.8 % · FY23: 11.1 % · FY24: 12.5 %');
+    expect(html).toContain('class="print-signal"><strong>Signal:</strong> 🟢 Positive · Acceleration is healthy');
     expect(html).toContain('Simplified print-friendly view');
   });
 });
