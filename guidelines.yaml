@@ -1,0 +1,847 @@
+global:
+  extraction_sanity_checks:
+    - "Si algún múltiplo clave da 0, NaN, infinito o cambia de signo sin sentido (p.ej. EV=0), marcar como 'data_issue' y no puntuar."
+    - "Si EV/Market Cap o Net Debt/Net Cash se contradicen entre secciones, revisar definición de caja (cash vs cash+ST investments) y unidades."
+    - "Si dos múltiplos distintos salen idénticos sistemáticamente (EV/EBIT == EV/EBITDA), revisar mapeo de campos."
+  copy_rules:
+    - "No mezclar 'por acción' en métricas absolutas (Revenue, EBITDA, EBIT, Net Income, CFO, FCF)."
+    - "Separar 'model_rule' (umbral) de 'derived_stat' (σ, tendencia) y de 'note' (comentario)."
+    - "Evitar checks irrelevantes repetidos por métrica; usar checks específicos del concepto."
+
+metrics:
+
+  # ----------------------------
+  # 📈 CRECIMIENTO
+  # ----------------------------
+  revenue_cagr_5y:
+    display: "Crecimiento de ingresos (CAGR, 5Y)"
+    meaning: "Tasa de crecimiento anual compuesta (CAGR) de ingresos en los últimos 5 años."
+    watch: "Consistencia, base effect (efecto base), y cuánto es orgánico vs M&A; descomponer en precio/volumen/mix."
+    guide: "Genérico: <5% débil · 5–10% moderado · 10–15% bueno · >15% fuerte (muy dependiente de sector)."
+    model_rule: "signal = cagr > 15 ? bull : cagr > 8 ? neutral : bear"
+    traps: "M&A, cambios de perímetro, divisas y comparables pueden distorsionar CAGR."
+    consistency: "Comprobar que los ingresos están en la misma divisa y periodo (TTM vs FY) en toda la serie."
+
+  revenue_yoy_latest:
+    display: "Crecimiento interanual (YoY) de ingresos"
+    meaning: "Variación porcentual de ingresos vs el mismo periodo del año anterior (momentum/estacionalidad)."
+    watch: "Comparar YoY actual con promedio multianual y volatilidad (σ); detectar shocks puntuales."
+    guide: "No hay umbral universal; usar: fuerza (YoY) + estabilidad (σ) + tendencia."
+    model_rule: "strength = yoy > 10 ? bull : yoy > 5 ? neutral : bear; volatility = sigma_pp > 15 ? volatile : stable"
+    traps: "Un solo año puede exagerar el momentum; revisar estacionalidad y efectos calendario."
+    derived_stat: "sigma_pp (desviación estándar de YoY) y promedio"
+    consistency: "Si el YoY es de TTM, aclararlo; evitar mezclar YoY anual con trimestral."
+
+  eps_diluted_cagr_8y:
+    display: "Crecimiento del BPA diluido (CAGR, 8Y)"
+    meaning: "CAGR del beneficio por acción (BPA/EPS) diluido; incorpora cambios del número de acciones."
+    watch: "Comparar con CAGR de beneficio neto y evolución de acciones diluidas (recompras vs dilución por SBC)."
+    guide: "Mejor sostenido que picos; vigilar si el EPS crece solo por recompras."
+    model_rule: "signal = cagr > 15 ? bull : cagr > 8 ? neutral : bear"
+    traps: "Recompras, impuestos y partidas no recurrentes pueden inflar EPS sin mejora operativa."
+    consistency: "Aclarar si es EPS GAAP o ajustado; no mezclar."
+
+  ebitda_cagr:
+    display: "Crecimiento del EBITDA (CAGR)"
+    meaning: "CAGR del EBITDA (resultado operativo antes de D&A); aproxima crecimiento operativo."
+    watch: "Comparar con crecimiento de ingresos y tendencia de margen EBITDA (¿crece por volumen o por margen?)."
+    guide: "Genérico similar a ingresos, pero validar con márgenes."
+    model_rule: "signal = cagr > 15 ? bull : cagr > 8 ? neutral : bear"
+    traps: "EBITDA puede mejorar por reclasificaciones o menor gasto capitalizado; mirar calidad de caja."
+    consistency: "No confundir EBITDA con EBIT; validar que D&A no está incluido."
+
+  ebit_cagr:
+    display: "Crecimiento del beneficio operativo (EBIT) (CAGR)"
+    meaning: "CAGR del EBIT; capta crecimiento tras costes operativos y D&A."
+    watch: "Comparar con ingresos y margen EBIT; detectar apalancamiento operativo real."
+    guide: "Depende del sector; priorizar estabilidad."
+    model_rule: "signal = cagr > 15 ? bull : cagr > 8 ? neutral : bear"
+    traps: "One-offs, reestructuraciones, provisiones pueden mover EBIT."
+    consistency: "Aclarar si EBIT incluye/ excluye extraordinarios."
+
+  net_income_cagr:
+    display: "Crecimiento del beneficio neto (CAGR)"
+    meaning: "CAGR del beneficio neto; incluye impuestos, intereses y no-operativos."
+    watch: "Comparar con EBIT y con tasa efectiva de impuestos; vigilar efectos financieros/extraordinarios."
+    guide: "Sostenible > puntual; cuidado con volatilidad por fiscalidad/one-offs."
+    model_rule: "signal = cagr > 15 ? bull : cagr > 8 ? neutral : bear"
+    traps: "Ganancias/pérdidas no recurrentes y cambios fiscales distorsionan."
+    consistency: "Ver reconciliación NI vs CFO (cash conversion)."
+
+  fcf_cagr:
+    display: "Crecimiento del flujo de caja libre (FCF) (CAGR)"
+    meaning: "CAGR del FCF (típicamente CFO - Capex); mide crecimiento de caja disponible."
+    watch: "Comparar con ingresos y NI; preferir FCF creciente con márgenes estables."
+    guide: "Más estable > más alto; depende de ciclo de Capex."
+    model_rule: "signal = cagr > 15 ? bull : cagr > 8 ? neutral : bear"
+    traps: "Capital circulante y picos de Capex pueden distorsionar ventanas cortas."
+    consistency: "Definir FCF (unlevered vs levered) y mantenerlo constante."
+
+  # ----------------------------
+  # 💰 RENTABILIDAD Y MÁRGENES
+  # ----------------------------
+  gross_margin:
+    display: "Margen bruto"
+    meaning: "(Ingresos - COGS) / Ingresos. Indica poder de precios (pricing power) y economía unitaria."
+    watch: "Nivel + tendencia + estabilidad; relacionar con mix (mezcla de productos) y costes de insumo."
+    guide: "Comparar con historial y peers; expansión sostenida = positivo."
+    model_rule: "signal = trend_up && sigma_pp < 5 ? bull : trend_flat ? neutral : bear"
+    traps: "Cambios de mix o reconocimiento contable pueden mover margen sin mejora real."
+    derived_stat: "sigma_pp de margen y tendencia"
+    consistency: "COGS% debe ser 1 - gross margin (a igual definición)."
+
+  ebit_margin:
+    display: "Margen operativo (EBIT)"
+    meaning: "EBIT / Ingresos. Captura rentabilidad operativa tras Opex y D&A."
+    watch: "Si sube a la vez que el margen bruto → eficiencia real; si no, Opex está presionando."
+    guide: "Muy sectorial; comparar con peers/historia."
+    model_rule: "signal = level_high && stable ? bull : neutral"
+    traps: "Reestructuraciones y provisiones afectan EBIT."
+    consistency: "No confundir con margen EBITDA."
+
+  ebitda_margin:
+    display: "Margen EBITDA"
+    meaning: "EBITDA / Ingresos. Útil para comparar operativa antes de D&A."
+    watch: "Comparar con margen EBIT (gap por D&A) y con conversión a caja (CFO/NI, FCF margin)."
+    guide: "Sectorial; expansión sostenida = positivo."
+    model_rule: "signal = trend_up ? bull : trend_flat ? neutral : bear"
+    traps: "EBITDA alto no garantiza caja si hay Capex alto o WC desfavorable."
+    consistency: "Si EV/EBITDA usa EBITDA distinto (LTM vs NTM), etiquetar."
+
+  fcf_margin:
+    display: "Margen de flujo de caja libre (FCF)"
+    meaning: "FCF / Ingresos. Mide cuánto de cada € de ventas acaba en caja libre."
+    watch: "Más alto y estable suele ser mejor; revisar Capex y capital circulante."
+    guide: "Muy sectorial; comparar con peers/historia."
+    model_rule: "signal = level_high && stable ? bull : neutral"
+    traps: "FCF puede ser alto temporalmente por menor Capex o liberación de WC."
+    consistency: "Usar misma definición de FCF en todo el dashboard."
+
+  operating_leverage_proxy:
+    display: "Apalancamiento operativo (proxy por márgenes)"
+    meaning: "Comparación Δ margen bruto vs Δ margen EBIT para inferir presión/eficiencia de Opex."
+    watch: "Patrón sano: EBIT margin mejora al menos tanto como gross margin; si no, Opex está absorbiendo el beneficio."
+    guide: "Sin umbral fijo; importa signo y persistencia."
+    model_rule: "signal = delta_ebit_pp >= delta_gross_pp ? bull : delta_ebit_pp > 0 ? neutral : bear"
+    traps: "No es apalancamiento operativo “puro” (Δ%EBIT/Δ%Ventas); es aproximación."
+    consistency: "Asegurar que los deltas usan la misma ventana temporal."
+
+  # ----------------------------
+  # 🏗️ COSTES / OPEx
+  # ----------------------------
+  cogs_pct_revenue:
+    display: "COGS como % de ingresos"
+    meaning: "COGS / Ingresos. Es el inverso del margen bruto."
+    watch: "Tendencia a la baja suele indicar mejor escala/mix; validar que no sea por reclasificaciones."
+    guide: "Sectorial; comparar con historia/peers."
+    model_rule: "signal = delta_pp < 0 ? bull : delta_pp < 2 ? neutral : bear"
+    traps: "Capitalización/reclasificación de costes puede “mejorar” artificialmente."
+    consistency: "Debe cuadrar con margen bruto."
+
+  opex_pct_gross_profit:
+    display: "Gastos operativos como % del beneficio bruto (OpEx / Gross Profit)"
+    meaning: "Cuánto del beneficio bruto consume la estructura de OpEx; menor suele ser mejor."
+    watch: "Baja con escala = positivo; pero vigilar si se recorta inversión (I+D/marketing) de forma dañina."
+    guide: "Sectorial; mirar tendencia y percentil."
+    model_rule: "signal = ratio < 60 ? bull : ratio < 80 ? neutral : bear"
+    traps: "Fases de inversión deliberada suben el ratio; evaluar retorno (payback)."
+    consistency: "Definir OpEx consistentemente (SG&A + R&D + otros)."
+
+  sga_pct_revenue:
+    display: "SG&A como % de ingresos"
+    meaning: "SG&A / Ingresos. Mide eficiencia del overhead comercial/administrativo."
+    watch: "Estable o bajando con crecimiento = buena escala."
+    guide: "Sectorial; evitar umbral rígido."
+    model_rule: "signal = trend_down ? bull : trend_flat ? neutral : bear"
+    traps: "Reclasificaciones contables pueden mover SG&A."
+    consistency: "Asegurar que SG&A incluye lo mismo en toda la serie."
+
+  rd_pct_revenue:
+    display: "I+D como % de ingresos"
+    meaning: "R&D / Ingresos. Intensidad de inversión en innovación."
+    watch: "Comparar con peers y resultado (pipeline/productos, márgenes, crecimiento futuro)."
+    guide: "No universal; tech/salud suelen ser más altos."
+    model_rule: "signal = (sector_requires_rd && rd_too_low) ? bear : neutral"
+    traps: "R&D demasiado bajo puede erosionar foso; demasiado alto sin retorno presiona márgenes."
+    consistency: "Aclarar si R&D incluye SBC o no."
+
+  effective_tax_rate:
+    display: "Tasa efectiva de impuestos"
+    meaning: "Impuestos / Beneficio antes de impuestos (EBT). Proxy de carga fiscal realizada."
+    watch: "Nivel + estabilidad; identificar one-offs (créditos, repatriaciones, cambios jurisdicción)."
+    guide: "Comparar con estatutaria y peers; volatilidad alta suele ser evento puntual."
+    model_rule: "signal = (rate < peer_median && sigma_pp < 5) ? bull : (sigma_pp > 7) ? neutral : neutral"
+    traps: "Partidas fiscales extraordinarias distorsionan el 'NI' (beneficio neto) de un año."
+    consistency: "Si hay 'volatile tax rate', la señal no debería ser verde sin matiz."
+
+  interest_expense_pct_revenue:
+    display: "Gastos por intereses como % de ingresos"
+    meaning: "Interest expense / Ingresos. Carga financiera relativa al tamaño del negocio."
+    watch: "Leer con deuda neta, cobertura de intereses y vencimientos."
+    guide: "Más bajo suele ser mejor; depende de estructura de capital."
+    model_rule: "signal = ratio < 2 ? bull : ratio < 5 ? neutral : bear"
+    traps: "Mix fijo/variable cambia sensibilidad a tipos."
+    consistency: "Si interest expense es negativo (ingresos netos por intereses), explicarlo."
+
+  sbc_pct_revenue:
+    display: "Compensación en acciones (SBC) como % de ingresos"
+    meaning: "Stock-based compensation / Ingresos. Indica intensidad de SBC y potencial dilución."
+    watch: "Comparar con cambio neto de acciones (shares) y recompras netas; SBC alta puede reducir valor por acción."
+    guide: "Genérico: <3% bajo · 3–8% medio · >8% alto (depende del sector/etapa)."
+    model_rule: "signal = ratio < 3 ? bull : ratio < 8 ? neutral : bear"
+    traps: "Tratar SBC como 'no caja' puede sobreestimar la calidad del beneficio; el coste real es dilución."
+    consistency: "Si hay recompras, mostrar 'net dilution' (emisión - recompras) además del gasto SBC."
+
+  # ----------------------------
+  # 🏰 RETORNOS / FOSO
+  # ----------------------------
+  roe:
+    display: "ROE (Retorno sobre patrimonio)"
+    meaning: "ROE = Beneficio neto / Patrimonio medio. Puede inflarse si el equity baja por recompras/deuda."
+    watch: "Validar con ROA/ROIC y con multiplicador de equity (apalancamiento)."
+    guide: "Comparar con peers; ROE muy alto con alto apalancamiento exige cautela."
+    model_rule: "signal = (roe > 20 && equity_multiplier < 3) ? bull : (roe > 15) ? neutral : bear"
+    traps: "Equity bajo/negativo puede hacer ROE 'explosivo' sin mejora económica."
+    consistency: "Si equity <= 0, ROE no es interpretable; marcar como no puntuable."
+
+  roa:
+    display: "ROA (Retorno sobre activos)"
+    meaning: "ROA = Beneficio neto / Activos medios. Mide eficiencia del uso de activos (capital intensity)."
+    watch: "Sube con mejores márgenes o mayor rotación de activos; comparar con asset turnover."
+    guide: "Muy sectorial; comparar con peers/historia."
+    model_rule: "signal = roa > 10 ? bull : roa > 5 ? neutral : bear"
+    traps: "Activos inflados por goodwill o cambios contables afectan ROA."
+    consistency: "Usar activos promedio (begin+end)/2 si puedes."
+
+  equity_multiplier:
+    display: "Multiplicador del patrimonio (Assets/Equity)"
+    meaning: "Equity Multiplier = Activos medios / Patrimonio medio. Es una medida de apalancamiento (leverage)."
+    watch: "Multiplicador alto indica ROE apoyado en deuda/pasivos; validar sostenibilidad con cobertura y liquidez."
+    guide: "Genérico: <2 conservador · 2–4 moderado · >4 alto (muy sectorial)."
+    model_rule: "signal = em < 2 ? bull : em < 4 ? neutral : bear"
+    traps: "Equity reducido por recompras eleva el multiplicador sin que suba la deuda 'económica'."
+    consistency: "Si equity es muy pequeño, mostrar warning de sensibilidad."
+
+  # ----------------------------
+  # 📊 BALANCE (COMPOSICIÓN)
+  # ----------------------------
+  cash_pct_assets:
+    display: "Caja y equivalentes / Activo total"
+    meaning: "Caja & equivalentes / Activo total. Reserva de liquidez y amortiguador ante estrés."
+    watch: "Nivel + tendencia + coherencia con net debt/net cash."
+    guide: "Depende del modelo; comparar con peers."
+    model_rule: "signal = ratio > 10 ? bull : ratio > 5 ? neutral : bear"
+    traps: "Caja puede excluir inversiones a corto plazo; definir consistentemente."
+    consistency: "Conciliar con EV vs Market Cap y Net Debt."
+
+  ar_days:
+    display: "Cuentas por cobrar (días)"
+    meaning: "DSO ≈ (Cuentas por cobrar / Ingresos) * 365. Días medios para cobrar."
+    watch: "Subidas persistentes pueden indicar presión en cobros o cambios de mix/canal."
+    guide: "Comparar con peers y estacionalidad."
+    model_rule: "signal = trend_down ? bull : trend_flat ? neutral : bear"
+    traps: "Cambios de reconocimiento de ingresos alteran DSO."
+    consistency: "Aclarar si usas ingresos anualizados o TTM."
+
+  inventory_days:
+    display: "Inventario (días en mano)"
+    meaning: "DIO ≈ (Inventario / COGS) * 365. Días medios de inventario."
+    watch: "Muy alto puede indicar sobrestock/obsolescencia; muy bajo puede tensar servicio."
+    guide: "Muy sectorial."
+    model_rule: "signal = dio < peer_median ? bull : neutral"
+    traps: "Cambios de mix y supply chain distorsionan."
+    consistency: "Usar COGS consistente con margen bruto."
+
+  goodwill_intangibles_pct_assets:
+    display: "Goodwill + intangibles / Activo total"
+    meaning: "Proporción de activos ligada a adquisiciones/intangibles; mayor proporción → más riesgo de impairment."
+    watch: "Si es alta, vigilar cargos por deterioro y calidad de adquisiciones."
+    guide: "Depende del sector; en software puede ser normal."
+    model_rule: "signal = ratio < 20 ? bull : ratio < 40 ? neutral : bear"
+    traps: "No toda intangibilidad es mala; depende del modelo (IP, marcas)."
+    consistency: "Separar goodwill de intangibles si es posible."
+
+  retained_earnings:
+    display: "Beneficios retenidos"
+    meaning: "Acumulado histórico de beneficios no distribuidos (menos dividendos); puede ser negativo por recompras/dividendos."
+    watch: "Interpretar con tendencia de equity y política de capital return."
+    guide: "Negativo no implica pérdidas si hay buybacks agresivos."
+    model_rule: "signal = neutral  # requiere contexto"
+    traps: "Asumir 'mala empresa' por retained earnings negativo es error."
+    consistency: "Conciliar con total equity y buybacks."
+
+  total_equity:
+    display: "Fondos propios totales"
+    meaning: "Patrimonio contable (book equity). Base para ROE y ratios de solvencia."
+    watch: "Tendencia y composición (retained earnings, recompras, OCI)."
+    guide: "Depende del modelo; en empresas con grandes recompras puede bajar."
+    model_rule: "signal = equity > 0 ? neutral : bear"
+    traps: "Equity negativo vuelve P/B y ROE no interpretables."
+    consistency: "Si equity <= 0: desactivar P/B y ROE."
+
+  # ----------------------------
+  # 🏦 DEUDA / SALUD FINANCIERA
+  # ----------------------------
+  total_debt_to_capital:
+    display: "Deuda total / Capital (Debt / (Debt + Equity))"
+    meaning: "Mide qué parte del capital está financiada con deuda."
+    watch: "Leer con cobertura de intereses, net debt/EBITDA y liquidez."
+    guide: "Genérico: <30% bajo · 30–60% medio · >60% alto (muy sectorial)."
+    model_rule: "signal = ratio < 30 ? bull : ratio < 60 ? neutral : bear"
+    traps: "Equity muy bajo por recompras puede subir el ratio aunque deuda no cambie."
+    consistency: "Asegurar definición de 'deuda total' (incluye leases o no)."
+
+  liabilities_to_assets:
+    display: "Pasivo total / Activo total"
+    meaning: "Porción de activos financiada con pasivos (deuda + otros)."
+    watch: "Interpretar con modelo de negocio (proveedores/ingresos diferidos pueden subir pasivos)."
+    guide: "Genérico: <60% bajo · 60–80% medio · >80% alto."
+    model_rule: "signal = ratio < 60 ? bull : ratio < 80 ? neutral : bear"
+    traps: "Pasivos operativos (deferred revenue) no son lo mismo que deuda."
+    consistency: "Separar deuda vs pasivos operativos si puedes."
+
+  net_debt_to_ebitda:
+    display: "Deuda neta / EBITDA"
+    meaning: "(Deuda total - Caja) / EBITDA. Negativo = caja neta."
+    watch: "Complementar con vencimientos y liquidez."
+    guide: "0–2x cómodo · 2–3x medio · 3–5x estresado · >5x alto (genérico)."
+    model_rule: "signal = value < 0 ? bull : value < 2 ? neutral : bear"
+    traps: "Definición de caja cambia el signo; aclarar cash vs cash+ST investments."
+    consistency: "Si value < 0, EV debería tender a < MC (si no hay otros ajustes)."
+
+  long_term_debt:
+    display: "Deuda a largo plazo"
+    meaning: "Deuda con vencimiento > 12 meses (importe absoluto)."
+    watch: "Tendencia, calendario de vencimientos, coste medio y cobertura."
+    guide: "No hay umbral absoluto; importa capacidad de servicio."
+    model_rule: "signal = trend_down ? bull : trend_flat ? neutral : bear"
+    traps: "Aumenta por refinanciación; mirar coste y plazo, no solo nivel."
+    consistency: "Conciliar con total debt."
+
+  current_ratio:
+    display: "Ratio corriente"
+    meaning: "Activos corrientes / Pasivos corrientes. Mide liquidez a corto plazo."
+    watch: "Si <1, puede ser estructural en modelos de CCC negativo; aun así vigilar vencimientos y acceso a financiación."
+    guide: "Genérico: >1.5 cómodo · 1.0–1.5 adecuado · <1.0 ajustado (depende)."
+    model_rule: "signal = value > 1.5 ? bull : value > 1.0 ? neutral : bear"
+    traps: "En negocios con fuerte supplier float, <1 no implica riesgo inmediato."
+    consistency: "Acompañar con CCC y cash/ST debt."
+
+  quick_ratio:
+    display: "Ratio rápido (Acid Test)"
+    meaning: "(Caja + cuentas por cobrar + inversiones CP) / Pasivos corrientes (excluye inventario)."
+    watch: "Más estricto que current ratio; <1 en CCC negativo puede ser normal."
+    guide: "Genérico: >1.2 sólido · 0.8–1.2 ok · <0.8 bajo."
+    model_rule: "signal = value > 1.2 ? bull : value > 0.8 ? neutral : bear"
+    traps: "Si AR no es muy cobrable, quick ratio puede sobreestimar liquidez."
+    consistency: "Aclarar qué entra en 'inversiones CP'."
+
+  interest_coverage_ebit:
+    display: "Cobertura de intereses (EBIT / Intereses)"
+    meaning: "Cuántas veces el EBIT cubre los intereses; mayor = más holgura."
+    watch: "Si baja rápido, riesgo; mirar también (EBITDA-Capex)/Intereses."
+    guide: "Genérico: >5x cómodo · 2–5x medio · <2x riesgo."
+    model_rule: "signal = value > 5 ? bull : value > 2 ? neutral : bear"
+    traps: "Intereses anómalos (muy bajos por deuda barata histórica) pueden cambiar con refinanciación."
+    consistency: "Si interest expense ~0, ratio explota; marcar no interpretable."
+
+  interest_coverage_cashlike:
+    display: "(EBITDA - Capex) / Intereses"
+    meaning: "Cobertura aproximada con caja operativa tras Capex (proxy de capacidad de pago)."
+    watch: "Mejor que EBIT/Intereses en negocios con D&A grande, pero depende de Capex real."
+    guide: "Genérico similar a cobertura EBIT."
+    model_rule: "signal = value > 5 ? bull : value > 2 ? neutral : bear"
+    traps: "Capex incluye crecimiento; ideal separar maintenance vs growth si es posible."
+    consistency: "Si Capex > EBITDA, ratio negativo: marcar estrés."
+
+  ffo_to_total_debt:
+    display: "FFO (o CFO) / Deuda total"
+    meaning: "Capacidad anual de generación de fondos frente a deuda total. Para corporates usar CFO/Total Debt si no hay FFO."
+    watch: "Cuánto tardaría en repagar deuda con fondos operativos (a mayor, mejor)."
+    guide: "Genérico: >0.4 fuerte · 0.2–0.4 medio · <0.2 débil."
+    model_rule: "if has_ffo: use ffo/total_debt else use cfo/total_debt; signal = ratio > 0.4 ? bull : ratio > 0.2 ? neutral : bear"
+    traps: "FFO es específico; no inventarlo si no existe en datos."
+    consistency: "Si total_debt ~0, ratio no interpretable."
+
+  total_debt_to_ebitda:
+    display: "Deuda total / EBITDA"
+    meaning: "Deuda total (no neta) / EBITDA. Mide apalancamiento bruto."
+    watch: "Comparar con net debt/EBITDA y nivel de caja."
+    guide: "Genérico: <2x cómodo · 2–3x medio · >3x alto."
+    model_rule: "signal = value < 2 ? bull : value < 3 ? neutral : bear"
+    traps: "EBITDA cíclico puede infravalorar riesgo en pico de ciclo."
+    consistency: "Asegurar EBITDA consistente (LTM vs FY)."
+
+  net_debt_to_ebitda_minus_capex:
+    display: "Deuda neta / (EBITDA - Capex)"
+    meaning: "Variante más conservadora: capacidad de repago tras Capex."
+    watch: "Si (EBITDA - Capex) es pequeño, el ratio se vuelve muy sensible."
+    guide: "Genérico similar a net debt/EBITDA pero más estricto."
+    model_rule: "signal = value < 0 ? bull : value < 2 ? neutral : bear"
+    traps: "Si Capex incluye crecimiento, penaliza empresas en expansión."
+    consistency: "Si EBITDA-Capex <= 0, marcar como estrés/no interpretable."
+
+  # ----------------------------
+  # 💸 CALIDAD DE FLUJO DE CAJA
+  # ----------------------------
+  cfo_level_trend:
+    display: "Cash From Operations (CFO)"
+    meaning: "Flujo de caja de operaciones: caja generada por el negocio antes de inversión/financiación."
+    watch: "Positivo y estable es clave; comparar con NI (accruals/devengos)."
+    guide: "No hay umbral; tendencia y estabilidad importan."
+    model_rule: "signal = positive_every_year ? bull : neutral"
+    traps: "Movimientos de capital circulante pueden inflar/deprimir un año."
+    consistency: "Aclarar si es CFO reportado (GAAP/IFRS) y periodo."
+
+  cfo_to_net_income_multi:
+    display: "CFO / Beneficio neto (conversión de caja, multi-año)"
+    meaning: "Cuánta caja operativa se genera por cada € de beneficio neto; >1 suele ser buena conversión."
+    watch: "Si <1 persistente, posible riesgo de devengos (accrual-heavy)."
+    guide: "Genérico: >1.1 fuerte · 0.9–1.1 ok · <0.9 alerta."
+    model_rule: "signal = ratio > 1.1 ? bull : ratio > 0.9 ? neutral : bear"
+    traps: "Ciclos de WC pueden bajar ratio temporalmente."
+    consistency: "Usar promedio multi-año para evitar ruido."
+
+  capex_to_cfo:
+    display: "Capex / CFO (tasa de reinversión)"
+    meaning: "Proporción del CFO que se reinvierte en Capex; más alto = más intensidad de capital."
+    watch: "Capex alto puede ser bueno si genera retornos; mirar ROIC/FCF margin."
+    guide: "Genérico: <25% bajo · 25–50% medio · >50% alto (sectorial)."
+    model_rule: "signal = ratio < 25 ? bull : ratio < 50 ? neutral : bear"
+    traps: "Capex puede incluir crecimiento; separar maintenance vs growth si puedes."
+    consistency: "Si CFO es pequeño, ratio se distorsiona; marcar warning."
+
+  net_debt_issuance_5y:
+    display: "Emisión / amortización neta de deuda (5Y)"
+    meaning: "Cambio neto acumulado de deuda: negativo = desapalancamiento; positivo = endeudamiento."
+    watch: "Si sube deuda y a la vez hay recompras/dividendos, puede ser ingeniería financiera."
+    guide: "Contextual; mirar junto con leverage y cobertura."
+    model_rule: "signal = net_change < 0 ? bull : neutral"
+    traps: "Refinanciaciones pueden mover sin cambiar riesgo; mirar coste y plazo."
+    consistency: "Conciliar con cambio neto de caja."
+
+  net_change_cash:
+    display: "Cambio neto en efectivo"
+    meaning: "Cuántos años el efectivo neto aumenta; indicador de estabilidad de generación y asignación."
+    watch: "No tiene que ser positivo siempre (si se devuelve caja al accionista), pero la conciliación debe cuadrar."
+    guide: "Contextual."
+    model_rule: "signal = neutral"
+    traps: "Años negativos pueden ser buybacks/dividendos, no debilidad."
+    consistency: "Conciliar con FCF uses + net borrowing."
+
+  # ----------------------------
+  # ⚙️ EFICIENCIA / OPERACIONES
+  # ----------------------------
+  asset_turnover:
+    display: "Rotación de activos"
+    meaning: "Ingresos / Activos medios. Cuánto vende por cada € de activos."
+    watch: "Sube con mejor utilización o modelo asset-light."
+    guide: "Muy sectorial."
+    model_rule: "signal = trend_up ? bull : neutral"
+    traps: "Outsourcing o M&A pueden moverlo mecánicamente."
+    consistency: "Usar activos promedio."
+
+  ar_turnover:
+    display: "Rotación de cuentas por cobrar"
+    meaning: "Ingresos / Cuentas por cobrar medias. Inversa aproximada de DSO."
+    watch: "Si baja, se cobra más lento."
+    guide: "Sectorial; mirar tendencia."
+    model_rule: "signal = trend_up ? bull : trend_flat ? neutral : bear"
+    traps: "Ventas estacionales distorsionan."
+    consistency: "Mantener coherencia con DSO."
+
+  inventory_turnover:
+    display: "Rotación de inventarios"
+    meaning: "COGS / Inventario medio. Inversa aproximada de DIO."
+    watch: "Muy alta puede tensionar stock; muy baja puede indicar sobrestock."
+    guide: "Sectorial."
+    model_rule: "signal = neutral  # depende del modelo"
+    traps: "Cambios de mix distorsionan."
+    consistency: "Mantener coherencia con DIO."
+
+  cash_conversion_cycle:
+    display: "Ciclo de conversión de caja (CCC)"
+    meaning: "CCC = DIO + DSO − DPO. Días que la caja queda “atrapada” en operaciones; menor es mejor."
+    watch: "CCC negativo suele ser potente (cobras antes de pagar), pero debe ser sostenible."
+    guide: "Más bajo mejor; comparar con peers."
+    model_rule: "signal = ccc < 0 ? bull : ccc < peer_median ? neutral : bear"
+    traps: "CCC muy negativo puede venir de estrés (pagar tarde) o poder de negociación."
+    consistency: "Asegurar que DSO/DIO/DPO usan la misma base (TTM/FY)."
+
+  dso:
+    display: "Días de ventas pendientes (DSO)"
+    meaning: "Días medios en cobrar ventas a crédito."
+    watch: "Subida persistente = alerta; bajada = mejora de cobros."
+    guide: "Sectorial."
+    model_rule: "signal = trend_down ? bull : trend_flat ? neutral : bear"
+    traps: "Cambio de canal/financiación puede mover DSO."
+    consistency: "Debe cuadrar con AR turnover."
+
+  dpo:
+    display: "Días de pago pendientes (DPO)"
+    meaning: "Días medios en pagar a proveedores (supplier float)."
+    watch: "Más alto mejora caja, pero si sube mucho puede indicar estrés o tensar proveedores."
+    guide: "Sectorial."
+    model_rule: "signal = neutral  # depende; mirar CCC"
+    traps: "Extremos pueden ser subóptimos por fricción supply chain."
+    consistency: "Interpretar siempre junto con CCC."
+
+  fixed_asset_turnover:
+    display: "Rotación de activos fijos"
+    meaning: "Ingresos / PP&E medio. Eficiencia del uso de activos físicos."
+    watch: "Sube con mejor utilización o modelo menos intensivo."
+    guide: "Sectorial."
+    model_rule: "signal = trend_up ? bull : neutral"
+    traps: "Revaluaciones, ventas de activos y outsourcing distorsionan."
+    consistency: "Definir PP&E neto vs bruto."
+
+  working_capital_turnover:
+    display: "Rotación de capital circulante"
+    meaning: "Ingresos / Capital circulante medio (CA - CL). Si WC es negativo, el ratio puede ser negativo."
+    watch: "WC negativo puede ser fortaleza (financiación de proveedores) si CCC es negativo y CFO fuerte."
+    guide: "No usar umbral fijo; leer con CCC."
+    model_rule: "signal = neutral"
+    traps: "El signo hace el ratio poco comparable entre empresas."
+    consistency: "Si WC cercano a 0, ratio explota; marcar no interpretable."
+
+  # ----------------------------
+  # 🏷️ VALORACIÓN
+  # ----------------------------
+  ev_vs_market_cap:
+    display: "EV vs capitalización de mercado"
+    meaning: "EV ajusta market cap por deuda neta (y otros). Si EV < MC suele implicar caja neta."
+    watch: "Usar como chequeo de balance y para elegir múltiplos EV-x vs P-x."
+    guide: "No es 'barato/caro' por sí mismo."
+    model_rule: "signal = ev < mc ? bull : neutral"
+    traps: "EV puede incluir minoritarios/preferentes; no asumir solo net debt."
+    consistency: "Si net cash, EV debería tender a < MC."
+
+  forward_pe_ntm:
+    display: "P/E futuro (NTM)"
+    meaning: "Precio / BPA estimado a 12 meses (NTM). Depende de revisiones de consenso."
+    watch: "Comparar con historia propia, peers y calidad/durabilidad del crecimiento."
+    guide: "Sin umbral universal; depende de tipos y calidad."
+    model_rule: "signal = pe > hist_avg * 1.1 ? bear : pe < hist_avg * 0.9 ? bull : neutral"
+    traps: "El forward EPS se revisa rápido; el múltiplo puede cambiar sin mover el precio."
+    consistency: "Aclarar fuente y fecha de estimaciones."
+
+  price_to_sales:
+    display: "Precio / Ventas (P/S)"
+    meaning: "Market cap / Ingresos. Útil cuando beneficios son ruidosos; exige mirar márgenes."
+    watch: "P/S alto solo se justifica con márgenes duraderos + fuerte conversión a FCF."
+    guide: "Muy sectorial."
+    model_rule: "signal = neutral  # mejor con percentiles sectoriales"
+    traps: "Crecimiento de ventas sin margen hace P/S engañoso."
+    consistency: "Usar ingresos TTM o FY de forma consistente."
+
+  price_to_book:
+    display: "Precio / Valor contable (P/B)"
+    meaning: "Market cap / Patrimonio contable. Útil en financieros/asset-heavy; menos en intangibles."
+    watch: "Interpretar con ROE y calidad del book."
+    guide: "Sectorial."
+    model_rule: "if equity <= 0: not_interpretable; else signal = neutral"
+    traps: "En intangibles, book infrarrepresenta activos económicos."
+    consistency: "Si equity <= 0, desactivar señal."
+
+  ev_ebitda_ntm:
+    display: "EV/EBITDA (NTM)"
+    meaning: "EV / EBITDA estimado a 12 meses. Múltiplo operativo popular."
+    watch: "Comparar con historia/peers y con margen y crecimiento."
+    guide: "Sectorial."
+    model_rule: "signal = multiple > hist_avg * 1.1 ? bear : multiple < hist_avg * 0.9 ? bull : neutral"
+    traps: "EBITDA no es caja; mirar Capex/WC."
+    consistency: "Si EV/EBITDA == EV/EBIT frecuentemente, revisar bug."
+
+  ev_ebit:
+    display: "EV/EBIT"
+    meaning: "EV / EBIT. Más conservador que EV/EBITDA porque incluye D&A."
+    watch: "Útil en negocios con D&A relevante."
+    guide: "Sectorial."
+    model_rule: "signal = neutral"
+    traps: "EBIT puede incluir one-offs; aclarar."
+    consistency: "Validar que EBIT != EBITDA en la fuente."
+
+  p_to_fcf_ntm:
+    display: "Market Cap / FCF (NTM) (P/FCF)"
+    meaning: "Market cap / FCF estimado. Inverso de FCF yield."
+    watch: "Mejor con durabilidad de márgenes y reinversión."
+    guide: "Sectorial."
+    model_rule: "signal = neutral"
+    traps: "Definir FCF y estimaciones."
+    consistency: "Si también muestras FCF yield, que sea exacto inverso."
+
+  ev_to_gross_profit_ltm:
+    display: "EV / Beneficio bruto (LTM)"
+    meaning: "EV / Gross Profit LTM. Útil cuando EBITDA está distorsionado; conecta con margen bruto."
+    watch: "Comparar con P/S y márgenes."
+    guide: "Sectorial."
+    model_rule: "signal = neutral"
+    traps: "Gross profit no descuenta Opex."
+    consistency: "Gross profit debe cuadrar con revenue y gross margin."
+
+  ev_ebitda_ltm:
+    display: "EV / EBITDA (LTM)"
+    meaning: "EV / EBITDA LTM. Múltiplo sobre resultados recientes."
+    watch: "Cíclicos: LTM puede ser pico/valle."
+    guide: "Sectorial."
+    model_rule: "signal = neutral"
+    traps: "Ciclicidad."
+    consistency: "No confundir LTM con NTM."
+
+  ev_ebit_ltm:
+    display: "EV / EBIT (LTM)"
+    meaning: "EV / EBIT LTM."
+    watch: "Más conservador que EBITDA."
+    guide: "Sectorial."
+    model_rule: "signal = neutral"
+    traps: "One-offs."
+    consistency: "Si igual a EV/EBITDA LTM, revisar extracción."
+
+  p_to_levered_fcf_ltm:
+    display: "Market Cap / Levered FCF (LTM)"
+    meaning: "Múltiplo sobre FCF después de intereses (levered). Más sensible al apalancamiento."
+    watch: "Comparar con P/FCF unlevered; si divergen mucho, la deuda pesa."
+    guide: "Sectorial."
+    model_rule: "signal = neutral"
+    traps: "Definición de levered FCF varía; aclarar."
+    consistency: "No mezclar levered/unlevered sin etiqueta."
+
+  price_to_ncav:
+    display: "Price / NCAV (LTM)"
+    meaning: "NCAV ≈ Activos corrientes - Pasivo total. Si NCAV <= 0, no es interpretable."
+    watch: "Solo relevante en deep value/asset plays."
+    guide: "Si NCAV <= 0, no puntuar."
+    model_rule: "if ncav <= 0: not_interpretable else signal = multiple < 1 ? bull : neutral"
+    traps: "NCAV no capta intangibles ni rentabilidad."
+    consistency: "Si sale negativo, mostrar warning y desactivar señal."
+
+  fcf_yield_ntm:
+    display: "Rentabilidad de FCF (NTM) (FCF yield)"
+    meaning: "FCF estimado / Market cap. Es el inverso del P/FCF."
+    watch: "Mayor yield puede ser atractivo si FCF es sostenible."
+    guide: "Sectorial; comparar con historia y coste de capital."
+    model_rule: "signal = yield > 6 ? bull : yield > 3 ? neutral : bear"
+    traps: "FCF cíclico o inflado por WC puede falsear el yield."
+    consistency: "Que sea inverso de P/FCF NTM."
+
+  dividend_yield:
+    display: "Rentabilidad por dividendo"
+    meaning: "Dividendo anual por acción / Precio."
+    watch: "Sostenibilidad (payout) y crecimiento del dividendo."
+    guide: "Muy sectorial."
+    model_rule: "signal = neutral"
+    traps: "Yield alto puede venir de caída de precio por problemas."
+    consistency: "Aclarar si el dividendo es trailing o forward."
+
+  pe_context_map:
+    display: "Mapa de contexto P/E (informativo)"
+    meaning: "Mapa heurístico para contextualizar P/E por tipo de negocio (no regla)."
+    watch: "Usar solo como orientación; validar con crecimiento, calidad y riesgo."
+    guide: "No puntuar."
+    model_rule: "signal = neutral  # solo contexto"
+    traps: "No es universal; depende de tipos y régimen."
+    consistency: "Marcar como 'informativo' explícitamente."
+
+  # ----------------------------
+  # 🎯 DIVIDENDOS / ACCIONISTA
+  # ----------------------------
+  dividend_per_share:
+    display: "Dividendos por acción"
+    meaning: "Dividendo pagado por acción; describe política de retorno."
+    watch: "Crecimiento del dividendo y cobertura por FCF."
+    guide: "Payout muy alto reduce resiliencia."
+    model_rule: "signal = never_cut ? bull : neutral"
+    traps: "Si el historial mostrado es corto, no afirmar 'never cut' sin gating."
+    consistency: "Aclarar ventana histórica usada."
+
+  payout_ratio:
+    display: "Payout ratio"
+    meaning: "Dividendos / Beneficio neto (o /FCF si defines payout sobre caja). Indicar cuál usas."
+    watch: "Payout muy alto limita reinversión y margen ante caídas."
+    guide: "Genérico: <40% cómodo · 40–80% medio · >80% alto."
+    model_rule: "signal = payout < 40 ? bull : payout < 80 ? neutral : bear"
+    traps: "En sectores defensivos, payout alto puede ser normal; en growth, no."
+    consistency: "No mezclar payout sobre NI y sobre FCF sin etiqueta."
+
+  total_dividends_paid:
+    display: "Dividendos totales pagados"
+    meaning: "Caja total devuelta vía dividendos (importe absoluto)."
+    watch: "Leer con FCF y payout."
+    guide: "Contextual."
+    model_rule: "signal = neutral"
+    traps: "Sube por más acciones o por subida DPS; desglosar si puedes."
+    consistency: "Conciliar con cashflow financing."
+
+  buybacks_total_5y:
+    display: "Recompras de acciones (total 5Y)"
+    meaning: "Importe recomprado. Ideal mostrar también recompras netas (recompras - emisión)."
+    watch: "Crear valor si se recompran acciones a precios razonables y hay dilución neta baja."
+    guide: "Contextual."
+    model_rule: "signal = neutral"
+    traps: "Recompras pueden enmascarar SBC (dilución) si son solo compensatorias."
+    consistency: "Conciliar con cambio en acciones diluidas."
+
+  diluted_shares_change:
+    display: "Acciones diluidas en circulación (cambio)"
+    meaning: "Evolución del recuento de acciones; bajar suele aumentar valor por acción."
+    watch: "Si baja pero SBC es alto, mostrar net dilution."
+    guide: "Contextual."
+    model_rule: "signal = change_pct < 0 ? bull : neutral"
+    traps: "Splits y cambios de metodología."
+    consistency: "Aclarar fuente (diluted weighted avg vs end-of-period)."
+
+  shareholder_yield:
+    display: "Shareholder yield (dividendos + recompras netas) / market cap"
+    meaning: "Retorno directo de caja al accionista como % de la capitalización."
+    watch: "Preferible si es sostenible y financiado por FCF (no por deuda creciente)."
+    guide: "Contextual."
+    model_rule: "signal = yield > 5 ? bull : yield > 2 ? neutral : bear"
+    traps: "Errores de unidades pueden dar yields imposibles; si >20% revisar."
+    consistency: "Usar recompras netas si puedes (evita inflar)."
+
+  # ----------------------------
+  # 🔭 ESTIMACIONES DE CONSENSO
+  # ----------------------------
+  consensus_revenue_forward:
+    display: "Estimación de ingresos (consenso)"
+    meaning: "Ingresos esperados por consenso para el próximo periodo; sujeto a revisiones."
+    watch: "Cambio vs último reportado y dirección de revisiones."
+    guide: "No tratar como 'hecho'; es expectativa."
+    model_rule: "signal = revisions_up ? bull : revisions_down ? bear : neutral"
+    traps: "Las estimaciones cambian rápido; fecha de snapshot es clave."
+    consistency: "Mostrar timestamp de extracción."
+
+  consensus_eps_forward:
+    display: "Estimación de BPA (consenso)"
+    meaning: "BPA esperado por consenso (forward); refleja expectativas de rentabilidad."
+    watch: "Tendencia de revisiones y dispersión (si disponible)."
+    guide: "Contextual."
+    model_rule: "signal = revisions_up ? bull : revisions_down ? bear : neutral"
+    traps: "Cambios contables/one-offs afectan comparabilidad."
+    consistency: "Aclarar GAAP vs adjusted si aplica."
+
+  consensus_ebitda_forward:
+    display: "Estimación de EBITDA (consenso)"
+    meaning: "EBITDA esperado; útil para EV/EBITDA forward."
+    watch: "Revisiones y coherencia con ingresos/márgenes."
+    guide: "Contextual."
+    model_rule: "signal = revisions_up ? bull : revisions_down ? bear : neutral"
+    traps: "Definición de EBITDA puede variar."
+    consistency: "Etiquetar NTM."
+
+  consensus_fcf_forward:
+    display: "Estimación de FCF (consenso)"
+    meaning: "FCF esperado; clave para valorar retornos de caja."
+    watch: "Coherencia con CFO, Capex y márgenes."
+    guide: "Contextual."
+    model_rule: "signal = revisions_up ? bull : revisions_down ? bear : neutral"
+    traps: "FCF es sensible a WC y Capex; puede revisarse mucho."
+    consistency: "Definir FCF (un/levered)."
+
+  # ----------------------------
+  # 🧭 ARMONÍA / BANDERAS ROJAS
+  # ----------------------------
+  revenue_vs_earnings_harmony:
+    display: "Armonía ingresos vs beneficios (YoY gap)"
+    meaning: "Compara crecimiento YoY de ingresos vs beneficios para detectar divergencias relevantes."
+    watch: "Gap grande puede venir de márgenes, fiscalidad, recompras o one-offs; mirar persistencia."
+    guide: "Sin umbral fijo; gaps repetidos importan más que uno aislado."
+    model_rule: "signal = abs(gap_pp) < 10 ? bull : abs(gap_pp) < 20 ? neutral : bear"
+    traps: "Transiciones de margen pueden causar gaps temporales."
+    consistency: "Asegurar que ambos YoY comparan el mismo periodo."
+
+  accrual_risk_cfo_vs_ni:
+    display: "CFO vs beneficio neto (riesgo de devengo)"
+    meaning: "CFO/NI mide conversión de beneficio en caja; <1 sostenido puede indicar devengos altos."
+    watch: "Mirar multi-año; un año puede ser WC."
+    guide: ">1 suele ser saludable."
+    model_rule: "signal = ratio > 1.1 ? bull : ratio > 0.9 ? neutral : bear"
+    traps: "Capital circulante distorsiona a corto plazo."
+    consistency: "Promedio multi-año preferible."
+
+  fcf_trend_consistency:
+    display: "Consistencia tendencia ingresos/beneficios/FCF"
+    meaning: "Chequea si FCF acompaña la dirección de ingresos y beneficios."
+    watch: "Patrón 'beneficios suben y FCF plano/baja' repetido = alerta."
+    guide: "Contextual: capex-cycle puede justificar divergencias."
+    model_rule: "signal = (earnings_up && fcf_down) ? bear : neutral"
+    traps: "Capex de crecimiento y WC pueden explicar divergencias temporales."
+    consistency: "Etiquetar qué ventana define 'trend'."
+
+  # ----------------------------
+  # 🧱 REALIDAD DEL BALANCE
+  # ----------------------------
+  net_debt_net_cash:
+    display: "Deuda neta / Caja neta"
+    meaning: "Net debt = deuda total - caja. Si es negativo, hay caja neta."
+    watch: "Coherencia con EV vs MC y con ratios de apalancamiento."
+    guide: "Negativo suele ser fortaleza, pero depende de obligaciones."
+    model_rule: "signal = net_debt < 0 ? bull : neutral"
+    traps: "Definición de caja cambia el resultado."
+    consistency: "Conciliar cash vs ST investments."
+
+  cash_to_short_term_debt:
+    display: "Caja / Deuda a corto plazo"
+    meaning: "Cobertura inmediata de vencimientos CP; >1 implica caja suficiente para deuda CP."
+    watch: "Clave en entornos de crédito restrictivo."
+    guide: "Genérico: >1 cómodo · 0.5–1 medio · <0.5 alerta."
+    model_rule: "signal = ratio > 1 ? bull : ratio > 0.5 ? neutral : bear"
+    traps: "Caja puede estar 'restringida' o no disponible."
+    consistency: "Definir 'short-term debt' correctamente."
+
+  dso_delta:
+    display: "Tendencia de días de cobro (Δ DSO)"
+    meaning: "Cambio reciente en DSO; subida = cobro más lento."
+    watch: "Si sube varios periodos, revisar calidad de ventas/canal."
+    guide: "Contextual."
+    model_rule: "signal = delta_days < 0 ? bull : delta_days < 5 ? neutral : bear"
+    traps: "Estacionalidad."
+    consistency: "Misma base de ingresos."
+
+  inventory_growth_vs_revenue_growth:
+    display: "Crecimiento inventario vs ingresos (YoY)"
+    meaning: "Compara YoY inventario vs YoY ingresos para detectar destocking/overstock."
+    watch: "Inventario subiendo con ventas débiles = alerta; bajando con ventas fuertes puede ser eficiencia o riesgo de stockouts."
+    guide: "Contextual."
+    model_rule: "signal = (inv_yoy > rev_yoy + 10) ? bear : neutral"
+    traps: "Cambios de cadena de suministro."
+    consistency: "Aclarar si inventario es fin de periodo."
+
+  deferred_revenue_pct_revenue:
+    display: "Ingresos diferidos como % de ingresos"
+    meaning: "Obligación por servicios/entregas futuras ya cobradas (prepagos)."
+    watch: "En suscripción suele ser positivo; en hardware puede reflejar backlog/anticipos y timing."
+    guide: "Contextual por modelo."
+    model_rule: "signal = neutral"
+    traps: "No confundir con 'revenue growth'."
+    consistency: "Aclarar si es deferred revenue corriente o total."
+
+  # ----------------------------
+  # 💧 FCF — ASIGNACIÓN DE CAPITAL
+  # ----------------------------
+  fcf_uses_summary:
+    display: "Resumen de usos del FCF"
+    meaning: "Desglosa a dónde va la caja libre (recompras, dividendos, deuda, caja)."
+    watch: "La suma puede exceder 100% si se financia con deuda o reducción de caja; conciliar siempre."
+    guide: "No puntuar; es contexto."
+    model_rule: "signal = neutral"
+    traps: "Si porcentajes >100% sin explicación, parece bug."
+    consistency: "Conciliar con net borrowing y net change in cash."
+
+  sbc_pct_fcf:
+    display: "SBC como % del FCF"
+    meaning: "Relaciona SBC con la caja libre: alto puede indicar que parte del valor se transfiere vía dilución."
+    watch: "Combinar con cambio neto de acciones y recompras netas."
+    guide: "Genérico: <10% bajo · 10–25% medio · >25% alto."
+    model_rule: "signal = ratio < 10 ? bull : ratio < 25 ? neutral : bear"
+    traps: "Aunque SBC no sea caja, el coste económico es dilución."
+    consistency: "Aclarar si SBC es gasto contable anual y FCF es mismo periodo."
+
+  sbc_pct_net_income:
+    display: "SBC como % del beneficio neto"
+    meaning: "Qué parte del beneficio neto 'equivale' a SBC contable; alto puede inflar calidad percibida del NI."
+    watch: "Si SBC alto y CFO/NI bajo, riesgo de calidad de beneficios."
+    guide: "Genérico: <10% bajo · 10–25% medio · >25% alto."
+    model_rule: "signal = ratio < 10 ? bull : ratio < 25 ? neutral : bear"
+    traps: "NI puede estar afectado por one-offs; mirar multi-año."
+    consistency: "Coherencia de periodos."
