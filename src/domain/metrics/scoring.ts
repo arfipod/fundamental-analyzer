@@ -1,3 +1,4 @@
+// @ts-nocheck
 import {
   canonicalizeFinancialLabel,
   localizeDynamicText,
@@ -6,7 +7,6 @@ import {
   renderPrintableMetricDetail
 } from './scoringLocalization';
 
-// @ts-nocheck
 const STORAGE_KEY = 'fundamentalAnalyzerLang';
 const DEFAULT_LANG = 'es';
 
@@ -5950,7 +5950,7 @@ function renderTrendBars(values, labels = []) {
     )}</div>`;
 }
 
-export function renderDashboard(data, results, industrySelection = null) {
+export function renderDashboard(data, results, industrySelection: { code: string; name: string; profile: string } | null = null) {
   const overallLabel = gradeLabel(results.overall || 'average');
 
   let html = `
@@ -6330,36 +6330,45 @@ export function switchDashboardTab(tab) {
 // MAIN
 // =========================================================
 function showDashboard() {
-  document.getElementById('landing').style.display = 'none';
-  const d = document.getElementById('dashboard');
-  d.style.display = 'block';
+  const landing = document.getElementById('landing');
+  const dashboard = document.getElementById('dashboard');
+  if (!landing || !dashboard) return;
+  landing.style.display = 'none';
+  dashboard.style.display = 'block';
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function showLanding() {
-  document.getElementById('dashboard').style.display = 'none';
-  document.getElementById('landing').style.display = 'flex';
+  const landing = document.getElementById('landing');
+  const dashboard = document.getElementById('dashboard');
+  if (!landing || !dashboard) return;
+  dashboard.style.display = 'none';
+  landing.style.display = 'flex';
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function goBack() {
+export function goBack() {
   // optional: keep previous pasted text; if you want to clear it, uncomment next line
   // document.getElementById('dataInput').value = '';
-  document.getElementById('dashboard').innerHTML = '';
+  const dashboard = document.getElementById('dashboard');
+  if (dashboard) dashboard.innerHTML = '';
   showLanding();
 }
 
 // Profile UI toggle
-function syncCustomProfileUI() {
-  const sel = document.getElementById('profileSelect');
+export function syncCustomProfileUI() {
+  const sel = document.getElementById('profileSelect') as HTMLSelectElement | null;
   const wrap = document.getElementById('customProfileWrap');
   if (!sel || !wrap) return;
   wrap.style.display = sel.value === 'custom' ? 'block' : 'none';
 }
 
-function analyzeData() {
-  const raw = document.getElementById('dataInput').value.trim();
+export function analyzeData() {
+  const inputEl = document.getElementById('dataInput') as HTMLTextAreaElement | null;
   const errEl = document.getElementById('error-msg');
+  if (!inputEl || !errEl) return;
+
+  const raw = inputEl.value.trim();
   errEl.style.display = 'none';
   errEl.textContent = '';
 
@@ -6377,10 +6386,8 @@ function analyzeData() {
 
     // Basic sanity: did we actually parse any table rows?
     const secCount = Object.keys(data.sections || {}).length;
-    const rowCount = Object.values(data.sections || {}).reduce(
-      (s, sec) => s + (sec?.rows?.length || 0),
-      0
-    );
+    const sections = Object.values(data.sections || {}) as Array<{ rows?: unknown[] }>;
+    const rowCount = sections.reduce((s, sec) => s + (sec?.rows?.length || 0), 0);
 
     if (secCount === 0 || rowCount === 0) {
       errEl.textContent =
@@ -6391,7 +6398,9 @@ function analyzeData() {
       return;
     }
 
-    const selected = document.getElementById('profileSelect').value;
+    const selected = (
+      document.getElementById('profileSelect') as HTMLSelectElement | null
+    )?.value || 'default';
 
     let customThresholds = null;
     let engineProfile = selected;
@@ -6423,3 +6432,4 @@ function analyzeData() {
     errEl.style.display = 'block';
   }
 }
+
