@@ -15,7 +15,7 @@ type MetricItem = {
   explanation?: string;
   signal?: string;
   signalText?: string;
-  values?: any;
+  values?: unknown;
 };
 
 type ResultSection = {
