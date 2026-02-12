@@ -237,7 +237,7 @@ describe('analysis regressions for alignment and period handling', () => {
 
   it('marks valuation as non-interpretable when market cap or EV are invalid', () => {
     setLanguage('en');
-    const dates = ['2023', '2024'];
+    const dates = ['2022', '2023', '2024'];
     const data = {
       company: 'Invalid Value Corp',
       sections: {
@@ -656,7 +656,38 @@ describe('cost and null-safety regressions', () => {
     const cogs = costs?.items.find((item) => item.name === 'COGS as % of Revenue');
 
     expect(cogs).toBeTruthy();
-    expect(cogs?.values).toEqual([40, 45, 40]);
+    const cogsValues = Array.isArray(cogs?.values) ? Array.from(cogs.values) : [];
+    expect(cogsValues).toEqual([40, 45, 40]);
+  });
+
+
+  it('skips zero-denominator periods in ratio series instead of producing invalid percentages', () => {
+    setLanguage('en');
+    const dates = ['2022', '2023', '2024'];
+    const data = {
+      company: 'Zero Denominator Corp',
+      sections: {
+        'Income Statement': {
+          dates,
+          rows: [
+            { label: 'Revenues', values: ['0', '100', '120'], dates },
+            { label: 'Cost of Goods Sold', values: ['10', '40', '48'], dates }
+          ]
+        },
+        'Balance Sheet': { dates, rows: [] },
+        'Cash Flow': { dates, rows: [] },
+        Ratios: { dates, rows: [] }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false }) as { sections: ResultSection[] };
+    const costs = results.sections.find((section) => section.id === 'costs');
+    const cogs = costs?.items.find((item) => item.name === 'COGS as % of Revenue');
+
+    expect(cogs).toBeTruthy();
+    const cogsValues = Array.isArray(cogs?.values) ? Array.from(cogs.values) : [];
+    expect(cogsValues).toEqual([40, 40]);
+    expect(cogs?.detail).toContain('Latest: 40.0%');
   });
 
   it('parses non-US currency prefixes in Price lines', () => {

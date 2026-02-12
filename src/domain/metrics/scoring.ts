@@ -169,7 +169,7 @@ function alignByDate(rowA, rowB, n = 6, options = {}) {
   );
   return aSeries
     .map((p) => ({ date: p.date, a: p.value, b: bMap.get(p.date) ?? null }))
-    .filter((p) => p.b !== null)
+    .filter((p) => p.a !== null && p.b !== null)
     .slice(-n);
 }
 
@@ -178,7 +178,7 @@ function ratioPctSeries(numerRow, denomRow, n = 6, options = {}) {
   const series = [];
   const labels = [];
   pairs.forEach((p) => {
-    if (!p.b) return;
+    if (p.a == null || p.b == null || p.b === 0) return;
     series.push((Math.abs(p.a) / Math.abs(p.b)) * 100);
     labels.push(p.date);
   });
@@ -769,11 +769,13 @@ function stddev(arr) {
 
 function yoyGrowth(vals) {
   if (!vals || vals.length < 2) return [];
-  return vals.slice(1).map((v, i) => {
+  const out = vals.slice(1).map((v, i) => {
     const prev = vals[i];
     if (!prev || prev === 0) return null;
     return ((v - prev) / Math.abs(prev)) * 100;
   });
+  if (vals.labels) out.labels = vals.labels.slice(1);
+  return out;
 }
 
 function median(arr) {
@@ -2605,19 +2607,16 @@ export function analyze(data, profile = 'default', options = {}) {
     'COGS'
   );
   if (cogsRow && revenueRow) {
-    const { pairs, series } = ratioPctSeries(cogsRow, revenueRow, 6);
+    const { series } = ratioPctSeries(cogsRow, revenueRow, 6);
     if (series.length >= 2) {
-      const latestPct =
-        (Math.abs(pairs[pairs.length - 1].a) /
-          Math.abs(pairs[pairs.length - 1].b)) *
-        100;
-      const firstPct = (Math.abs(pairs[0].a) / Math.abs(pairs[0].b)) * 100;
+      const latestPct = series[series.length - 1];
+      const firstPct = series[0];
       const delta = latestPct - firstPct;
       costItems.push(
         makeItem(
           'COGS as % of Revenue',
           `Latest: ${latestPct.toFixed(1)}% (Δ ${delta > 0 ? '+' : ''}${delta.toFixed(1)}pp)`,
-          pairs.map((p) => (p.a / p.b) * 100),
+          series,
           delta < -2 ? 'bull' : delta < 2 ? 'neutral' : 'bear',
           delta < -2 ? 'Improving' : delta < 2 ? 'Stable' : 'Rising Costs'
         )
@@ -6177,4 +6176,3 @@ export function analyzeData() {
     errEl.style.display = 'block';
   }
 }
-
