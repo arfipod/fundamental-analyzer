@@ -2705,7 +2705,14 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   function resolveMarketCapLatest() {
-    const directMcRow = findRowAny(vm || is, 'Capitalización bursátil', 'Market Cap');
+    const directMcRow =
+      findRowExact(
+        vm || is,
+        'Market Cap (MM)',
+        'Market Cap',
+        'Capitalización bursátil'
+      ) ||
+      findRowAny(vm || is, ['Market Cap', 'MM'], 'Capitalización bursátil', 'Market Cap');
     const directMc = getLatest(directMcRow);
     if (directMc !== null && directMc > 0) {
       return { marketCap: directMc, source: 'reported' as const };
@@ -2740,6 +2747,33 @@ export function analyze(data, profile = 'default', options = {}) {
     return {
       marketCap: directMc,
       source: 'invalid' as const
+    };
+  }
+
+  function resolveEnterpriseValueLatest() {
+    const evRow =
+      findRowExact(
+        vm || is,
+        'Total Enterprise Value (MM)',
+        'Total Enterprise Value',
+        'Enterprise Value',
+        'TEV',
+        'Valor total de la empresa',
+        'Valor empresarial total'
+      ) ||
+      findRowAny(
+        vm || is,
+        ['Total Enterprise Value', 'MM'],
+        'Valor total de la empresa',
+        'Valor empresarial total',
+        'Total Enterprise Value',
+        'Enterprise Value',
+        'TEV'
+      );
+
+    return {
+      enterpriseValue: getLatest(evRow),
+      row: evRow
     };
   }
 
@@ -4929,17 +4963,11 @@ export function analyze(data, profile = 'default', options = {}) {
 
   // Market Cap & EV
   const vmOrIS = vm || is;
-  const evRow = findRowAny(
-    vmOrIS,
-    'Valor total de la empresa',
-    'Valor empresarial total',
-    'Total Enterprise Value',
-    'Enterprise Value',
-    'TEV'
-  );
+  const evResolution = resolveEnterpriseValueLatest();
+  const evRow = evResolution.row;
   const mcResolution = resolveMarketCapLatest();
   const mcLatestForValidation = mcResolution.marketCap;
-  const evLatestForValidation = getLatest(evRow);
+  const evLatestForValidation = evResolution.enterpriseValue;
   const evIsValid =
     mcLatestForValidation !== null &&
     evLatestForValidation !== null &&
@@ -4947,7 +4975,7 @@ export function analyze(data, profile = 'default', options = {}) {
     evLatestForValidation > 0;
   if (mcLatestForValidation !== null && evRow) {
     const mc = mcLatestForValidation;
-    const ev = getLatest(evRow);
+    const ev = evLatestForValidation;
     if (mc !== null && ev !== null) {
       if (mc <= 0 || ev <= 0) {
         valItems.push(

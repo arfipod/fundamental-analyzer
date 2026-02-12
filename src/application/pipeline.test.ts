@@ -178,6 +178,34 @@ Period: annual | Sections: 7
     expect(evVsMc?.signalText || '').not.toContain('Invalid valuation datapoint');
   });
 
+  it('keeps EV vs MC valid on the full Apple fixture (no 0.0B/0.0B regression)', async () => {
+    const { parseInput } = await import('./parse');
+    const { runAnalysis } = await import('./analyze');
+
+    const fixture = fs.readFileSync(
+      path.resolve(process.cwd(), 'test-data/apple.md'),
+      'utf8'
+    );
+
+    const parsed = parseInput(fixture) as ParsedInput;
+    const results = runAnalysis(parsed, 'default', {
+      includeAnalystNoise: false
+    }) as AnalysisResult;
+
+    const allItems = (results.sections || []).flatMap((section: AnalysisSection) =>
+      section.items || []
+    );
+    const evVsMc = allItems.find(
+      (item) => item.name === 'Enterprise Value vs Market Cap'
+    );
+
+    expect(evVsMc).toBeTruthy();
+    expect(evVsMc?.detail || '').toContain('MC: $');
+    expect(evVsMc?.detail || '').toContain('EV: $');
+    expect(evVsMc?.detail || '').not.toContain('MC: $0.0B | EV: $0.0B');
+    expect(evVsMc?.signalText || '').not.toContain('Invalid valuation datapoint');
+  });
+
   it('parses english CSV financial exports and maps them to a statement section', async () => {
     const { parseInput } = await import('./parse');
 
