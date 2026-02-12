@@ -1117,6 +1117,80 @@ function getRecentValues(row, n = 5, options = {}) {
   return vals;
 }
 
+function extractPeriodYear(label) {
+  const text = String(label || '').trim();
+  if (!text) return null;
+
+  const y4 = text.match(/(19|20)\d{2}/);
+  if (y4) return Number(y4[0]);
+
+  const y2 = text.match(/\b(\d{2})\b/);
+  if (!y2) return null;
+  const yr = Number(y2[1]);
+  if (Number.isNaN(yr)) return null;
+  return yr >= 80 ? 1900 + yr : 2000 + yr;
+}
+
+function getLatestCagrWindow(row, targetYears = 5, lookbackPoints = 12) {
+  const series = toSeries(row).slice(-lookbackPoints);
+  if (series.length < 2) return null;
+
+  const latest = series[series.length - 1];
+  const latestYear = extractPeriodYear(latest.date);
+  let startIdx = null;
+  let effectiveYears = null;
+
+  if (latestYear !== null) {
+    let bestPartial = null;
+    for (let i = series.length - 2; i >= 0; i--) {
+      const y = extractPeriodYear(series[i].date);
+      if (y === null) continue;
+      const diff = latestYear - y;
+      if (diff === targetYears) {
+        startIdx = i;
+        effectiveYears = diff;
+        break;
+      }
+      if (diff > 0 && diff < targetYears) {
+        if (bestPartial === null || diff > bestPartial.diff) {
+          bestPartial = { i, diff };
+        }
+      }
+    }
+    if (startIdx === null && bestPartial !== null) {
+      startIdx = bestPartial.i;
+      effectiveYears = bestPartial.diff;
+    }
+  }
+
+  if (startIdx === null) {
+    startIdx = Math.max(0, series.length - (targetYears + 1));
+    effectiveYears = series.length - 1 - startIdx;
+  }
+
+  if (!effectiveYears || effectiveYears <= 0) return null;
+  const start = series[startIdx];
+  const gr = cagr(start.value, latest.value, effectiveYears);
+  return {
+    growth: gr,
+    years: effectiveYears,
+    startValue: start.value,
+    endValue: latest.value
+  };
+}
+
+function computeEquityMultiplierFromBalance(assetsRow, equityRow, n = 2) {
+  const pairs = alignByDate(assetsRow, equityRow, 10)
+    .filter((p) => p.a !== null && p.b !== null && p.b !== 0)
+    .slice(-Math.max(1, n));
+
+  if (!pairs.length) return null;
+  const avgAssets = avg(pairs.map((p) => p.a));
+  const avgEquity = avg(pairs.map((p) => p.b));
+  if (avgAssets === null || avgEquity === null || avgEquity === 0) return null;
+  return avgAssets / avgEquity;
+}
+
 function getLatest(row) {
   if (!row) return null;
   const vals = toSeries(row).map((p) => p.value);
@@ -2261,14 +2335,17 @@ export function analyze(data, profile = 'default', options = {}) {
 
   if (revenueRow) {
     const vals = getRecentValues(revenueRow, 10);
-    const latest = vals[vals.length - 1];
-    const five = vals.length >= 6 ? vals[vals.length - 6] : vals[0];
-    const years = vals.length >= 6 ? 5 : vals.length - 1;
-    const gr = cagr(five, latest, years);
+    const cagrWindow = getLatestCagrWindow(revenueRow, 5, 12);
+    const gr = cagrWindow?.growth ?? null;
+    const years = cagrWindow?.years ?? null;
+    const startValue = cagrWindow?.startValue ?? null;
+    const endValue = cagrWindow?.endValue ?? null;
     growthItems.push(
       makeItem(
         'Revenue Growth (CAGR)',
-        gr !== null ? `${years}Y CAGR: ${gr.toFixed(1)}%` : 'Insufficient data',
+        gr !== null && years !== null
+          ? `${years}Y CAGR: ${gr.toFixed(1)}%`
+          : 'Insufficient data',
         vals,
         gr > 15 ? 'bull' : gr > 8 ? 'neutral' : 'bear',
         gr > 15
@@ -2278,7 +2355,9 @@ export function analyze(data, profile = 'default', options = {}) {
             : gr > 0
               ? 'Slow'
               : 'Declining',
-        `Revenue: ${five?.toFixed(0)} → ${latest?.toFixed(0)}`
+        startValue !== null && endValue !== null
+          ? `Revenue: ${startValue.toFixed(0)} → ${endValue.toFixed(0)}`
+          : ''
       )
     );
 
@@ -2945,6 +3024,15 @@ export function analyze(data, profile = 'default', options = {}) {
     'ROE',
     'Return on Equity'
   );
+  const bsAssetsForMultiplier = findRowAny(bs, 'Total Assets', 'Activo total', 'Activos totales');
+  const bsEquityForMultiplier = findRowAny(
+    bs,
+    'Total Equity',
+    'Total Common Equity',
+    'Fondos propios totales',
+    'Patrimonio neto común total'
+  );
+
   if (roeRow) {
     const vals = getRecentValues(roeRow, 10);
     const latest = vals[vals.length - 1];
@@ -2955,10 +3043,11 @@ export function analyze(data, profile = 'default', options = {}) {
       'Return on Assets'
     );
     const roaForRoe = getLatest(roaRowForRoe);
-    const equityMultiplierForRoe =
-      latest !== null && roaForRoe !== null && roaForRoe !== 0
-        ? latest / roaForRoe
-        : null;
+    const equityMultiplierForRoe = computeEquityMultiplierFromBalance(
+      bsAssetsForMultiplier,
+      bsEquityForMultiplier,
+      2
+    );
     const leverageInflatedRoe =
       equityMultiplierForRoe !== null && equityMultiplierForRoe > 4;
     moatItems.push(
@@ -3017,13 +3106,15 @@ export function analyze(data, profile = 'default', options = {}) {
 
   // Dupont decomposition insight: ROE driven by margins vs leverage
   if (roeRow && roaRow) {
-    const roe = getLatest(roeRow);
-    const roa = getLatest(roaRow);
-    if (roe && roa && roa !== 0) {
-      const equityMultiplier = roe / roa;
+    const equityMultiplier = computeEquityMultiplierFromBalance(
+      bsAssetsForMultiplier,
+      bsEquityForMultiplier,
+      2
+    );
+    if (equityMultiplier !== null) {
       moatItems.push(
         makeItem(
-          'Equity Multiplier (ROE/ROA)',
+          'Equity Multiplier (Assets/Equity)',
           `${equityMultiplier.toFixed(1)}x — ${equityMultiplier < 2 ? 'Low leverage' : equityMultiplier < 3 ? 'Moderate leverage' : 'High leverage'}`,
           [],
           equityMultiplier < 2
@@ -3036,7 +3127,7 @@ export function analyze(data, profile = 'default', options = {}) {
             : equityMultiplier < 3
               ? 'Some Leverage'
               : 'Leverage-driven ROE',
-          'ROE = ROA × Equity Multiplier. Lower multiplier = ROE driven by profitability, not debt'
+          'Computed from balance sheet averages (Assets/Equity). Lower multiplier = ROE driven by profitability, not debt'
         )
       );
     }
@@ -3428,9 +3519,9 @@ export function analyze(data, profile = 'default', options = {}) {
     );
   }
 
+  const ndERow2 = findRowAny(ratios, 'Net Debt / EBITDA', 'Deuda Neta / EBITDA');
   const netDebtEbitdaRow = findRowAny(ce, 'Deuda Neta / EBITDA');
-  const ndERow2 = findRowAny(ratios, 'Net Debt / EBITDA');
-  const ndeSrc = netDebtEbitdaRow || ndERow2;
+  const ndeSrc = ndERow2 || netDebtEbitdaRow;
   if (ndeSrc) {
     const vals = getRecentValues(ndeSrc, 6);
     const latest = vals[vals.length - 1];
