@@ -1950,6 +1950,118 @@ const METRIC_INTERPRETATION_EXACT = {
       nextQuestions: '¿La divergencia es ciclo de reinversión o menor calidad de conversión a caja?'
     }
   },
+  'cash / assets': {
+    en: {
+      definition: 'Cash and near-cash buffer as a share of assets; indicates liquidity resilience and optionality.',
+      lookFor: 'Evaluate buffer size, trend, and whether liquidity supports capex, M&A, debt service, and buybacks.',
+      thresholds: 'Contextual by model and cyclicality; very low buffers increase shock sensitivity.',
+      pitfalls: 'Not all cash is equally available (restricted, trapped, or operational minimum cash).',
+      nextQuestions: 'How much of reported cash is truly deployable under stress?'
+    },
+    es: {
+      definition: 'Colchón de caja y cuasi-caja sobre activos; indica resiliencia de liquidez y opcionalidad.',
+      lookFor: 'Evaluar tamaño, tendencia y si soporta capex, M&A, servicio de deuda y recompras.',
+      thresholds: 'Depende de modelo y ciclicidad; buffers muy bajos elevan sensibilidad a shocks.',
+      pitfalls: 'No toda la caja es igual de disponible (restringida, atrapada o mínima operativa).',
+      nextQuestions: '¿Qué parte de la caja reportada es realmente desplegable en estrés?'
+    }
+  },
+  'forward p/e (ntm)': {
+    en: {
+      definition: 'Values next-twelve-month expected earnings; embeds growth, margin, and risk expectations.',
+      lookFor: 'Interpret with earnings quality and estimate reliability, not as a standalone buy/sell signal.',
+      thresholds: 'Relative context matters: own history, peers, and rates regime.',
+      pitfalls: 'Forward EPS can be revised quickly, making optically cheap/expensive levels unstable.',
+      nextQuestions: 'What EPS revision path is implied at the current multiple?'
+    },
+    es: {
+      definition: 'Valora beneficios esperados a 12 meses; incorpora expectativas de crecimiento, márgenes y riesgo.',
+      lookFor: 'Interpretar con calidad de beneficios y fiabilidad de estimaciones, no de forma aislada.',
+      thresholds: 'Importa el contexto relativo: historia propia, peers y régimen de tipos.',
+      pitfalls: 'El EPS forward puede revisarse rápido; lo “barato/caro” puede cambiar pronto.',
+      nextQuestions: '¿Qué trayectoria de revisiones de EPS exige el múltiplo actual?'
+    }
+  },
+  'price / sales': {
+    en: {
+      definition: 'Values each unit of revenue; useful when margins are cyclical or earnings are noisy.',
+      lookFor: 'Read with gross/operating margin structure and conversion to free cash flow.',
+      thresholds: 'Higher P/S is more justified with durable margins and strong cash conversion.',
+      pitfalls: 'Revenue growth without margin quality can make P/S look cheaper than economics justify.',
+      nextQuestions: "What normalized margin and FCF conversion are implied by today's P/S?"
+    },
+    es: {
+      definition: 'Valora cada unidad de ingresos; útil cuando márgenes son cíclicos o beneficios ruidosos.',
+      lookFor: 'Leer junto con estructura de márgenes y conversión a FCF.',
+      thresholds: 'Un P/S alto se justifica más con márgenes duraderos y fuerte conversión a caja.',
+      pitfalls: 'Crecimiento de ingresos sin calidad de margen puede hacer parecer el P/S más barato de lo real.',
+      nextQuestions: '¿Qué margen normalizado y conversión a FCF descuenta el P/S actual?'
+    }
+  },
+  'price / book value': {
+    en: {
+      definition: 'Values equity relative to accounting book value.',
+      lookFor: 'Most useful with asset-heavy/financial models and when book value quality is high.',
+      thresholds: 'Interpret with return on equity and capital intensity.',
+      pitfalls: 'For intangibles-heavy firms, book value may understate economic moat assets.',
+      nextQuestions: 'Is high P/B explained by sustainably high ROE or by accounting distortions?'
+    },
+    es: {
+      definition: 'Valora el patrimonio frente al valor contable.',
+      lookFor: 'Más útil en modelos intensivos en activos/financieros y con buena calidad contable del book.',
+      thresholds: 'Interpretar junto con ROE e intensidad de capital.',
+      pitfalls: 'En compañías intensivas en intangibles, el valor contable puede infrarrepresentar activos económicos.',
+      nextQuestions: '¿Un P/B alto se explica por ROE sostenible o por distorsiones contables?'
+    }
+  },
+  'ev / ebitda (ntm)': {
+    en: {
+      definition: 'Enterprise-value multiple over expected EBITDA, capital-structure neutral at headline level.',
+      lookFor: 'Use with reinvestment needs (capex) and cash conversion to avoid EBITDA-only bias.',
+      thresholds: 'Contextual vs peers/history and rates regime.',
+      pitfalls: 'Ignores capex intensity and working-capital demands; two firms with same EV/EBITDA can differ greatly in FCF.',
+      nextQuestions: 'How much EBITDA converts to owner cash after reinvestment?'
+    },
+    es: {
+      definition: 'Múltiplo de valor de empresa sobre EBITDA esperado, neutral a estructura de capital en titular.',
+      lookFor: 'Usarlo con necesidades de reinversión (capex) y conversión a caja para evitar sesgo EBITDA-only.',
+      thresholds: 'Contextual vs peers/historia y régimen de tipos.',
+      pitfalls: 'Ignora intensidad de capex y capital circulante; mismo EV/EBITDA puede implicar FCF muy distinto.',
+      nextQuestions: '¿Cuánto EBITDA se convierte en caja para el accionista tras reinversión?'
+    }
+  },
+  'ev / ebit (ntm)': {
+    en: {
+      definition: 'Enterprise-value multiple over expected operating profit after depreciation.',
+      lookFor: 'More informative than EV/EBITDA when depreciation tracks real asset consumption.',
+      thresholds: 'Interpret relatively, not as absolute good/bad levels.',
+      pitfalls: 'Accounting depreciation may still differ from true maintenance capex.',
+      nextQuestions: 'Is EBIT a good proxy for sustainable operating earning power here?'
+    },
+    es: {
+      definition: 'Múltiplo de valor de empresa sobre beneficio operativo esperado tras depreciación.',
+      lookFor: 'Más informativo que EV/EBITDA cuando la depreciación refleja consumo real de activos.',
+      thresholds: 'Interpretación relativa, no umbrales absolutos rígidos.',
+      pitfalls: 'La depreciación contable puede diferir del capex de mantenimiento real.',
+      nextQuestions: '¿El EBIT aproxima bien el poder de beneficio operativo sostenible?'
+    }
+  },
+  'total shareholder yield': {
+    en: {
+      definition: 'Dividends plus net buybacks relative to market cap; a direct shareholder cash-return lens.',
+      lookFor: 'Prefer sustainable yields funded by recurring FCF and stable balance sheet.',
+      thresholds: 'Very high yields can be attractive but require unit/scope sanity checks.',
+      pitfalls: 'Scaling/unit mismatches can produce impossible yields; avoid scoring until validated.',
+      nextQuestions: 'Is net shareholder yield still strong after SBC dilution and debt effects?'
+    },
+    es: {
+      definition: 'Dividendos más recompras netas sobre market cap; visión directa del retorno de caja al accionista.',
+      lookFor: 'Preferir yields sostenibles financiados por FCF recurrente y balance estable.',
+      thresholds: 'Yields muy altos pueden ser atractivos pero exigen chequeo de unidades/escala.',
+      pitfalls: 'Errores de escala/unidades pueden generar yields imposibles; no puntuar hasta validar.',
+      nextQuestions: '¿El yield al accionista sigue fuerte tras dilución por SBC y efectos de deuda?'
+    }
+  },
   'sg&a as % of revenue': {
     en: {
       definition: 'Measures sales/admin overhead efficiency relative to revenue.',
