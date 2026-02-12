@@ -779,4 +779,84 @@ describe('scoring regressions for period extraction and null-safe growth classif
     expect(html).toContain('<span class="md-label">Guide range:</span>');
     expect(html).toContain('5-10%');
   });
+  it('derives market cap from price and filing-date shares when reported market cap is missing', () => {
+    setLanguage('en');
+    const dates = ['2024', '2025'];
+    const data = {
+      company: 'Derived MC Corp',
+      priceNum: 274.62,
+      sections: {
+        'Income Statement': { dates, rows: [{ label: 'Revenue', values: ['100', '110'], dates }] },
+        'Balance Sheet': {
+          dates,
+          rows: [
+            { label: 'Total Shares Out. on Filing Date', values: ['15000', '14776.35'], dates }
+          ]
+        },
+        'Cash Flow': {
+          dates,
+          rows: [
+            { label: 'Common Stock Repurchased', values: ['-40000', '-45000'], dates },
+            { label: 'Dividends Paid', values: ['-15000', '-16000'], dates }
+          ]
+        },
+        Ratios: { dates, rows: [] },
+        'Valuation Multiples': {
+          dates,
+          rows: [
+            { label: 'Market Cap', values: ['0', '0'], dates },
+            { label: 'Enterprise Value', values: ['4200000', '4300000'], dates }
+          ]
+        }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false }) as { sections: ResultSection[] };
+    const valuation = results.sections.find((s) => s.id === 'valuation');
+    const shareholder = results.sections.find((s) => s.id === 'shareholder');
+    const evVsMc = valuation?.items.find((i) => i.name === 'Enterprise Value vs Market Cap');
+    const shYield = shareholder?.items.find((i) => i.name === 'Total Shareholder Yield');
+
+    expect(evVsMc?.detail).toContain('MC from price × shares');
+    expect(evVsMc?.signalText).not.toContain('Invalid valuation datapoint');
+    expect(shYield?.detail).toContain('MC from price × shares');
+    expect(shYield?.detail).toContain('1.5%');
+  });
+
+  it('avoids false debt mapping red flag and uses reported net debt sign when available', () => {
+    setLanguage('en');
+    const dates = ['2024', '2025'];
+    const data = {
+      company: 'Debt Mapping Corp',
+      sections: {
+        'Income Statement': { dates, rows: [{ label: 'Revenue', values: ['100', '110'], dates }] },
+        'Balance Sheet': {
+          dates,
+          rows: [
+            { label: 'Total Debt', values: ['110000', '112377'], dates },
+            { label: 'Cash And Equivalents', values: ['30000', '35934'], dates },
+            { label: 'Short-Term Investments', values: ['30000', '18763'], dates },
+            { label: 'Long-Term Investments', values: ['70000', '77723'], dates },
+            { label: 'Current Portion of Long-Term Debt', values: ['10000', '12350'], dates },
+            { label: 'Long-Term Debt', values: ['70000', '78328'], dates },
+            { label: 'Net Debt', values: ['-20000', '-20043'], dates }
+          ]
+        },
+        'Cash Flow': { dates, rows: [{ label: 'Cash from Operations', values: ['90000', '95000'], dates }] },
+        Ratios: { dates, rows: [{ label: 'Net Debt / EBITDA', values: ['-0.1', '-0.12'], dates }] },
+        'Valuation Multiples': { dates, rows: [] }
+      }
+    };
+
+    const results = analyze(data, 'default', { includeAnalystNoise: false }) as { sections: ResultSection[] };
+    const balance = results.sections.find((s) => s.id === 'balance');
+    const debtMapping = balance?.items.find((i) => i.name === 'Debt Mapping Integrity Check');
+    const netDebtConsistency = balance?.items.find((i) => i.name === 'Net Debt Consistency Check');
+    const netDebtNetCash = balance?.items.find((i) => i.name === 'Net Debt / Net Cash');
+
+    expect(debtMapping).toBeFalsy();
+    expect(netDebtConsistency).toBeFalsy();
+    expect(netDebtNetCash?.detail).toContain('Net Cash');
+  });
+
 });
