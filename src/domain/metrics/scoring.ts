@@ -269,6 +269,13 @@ function normalizeLabelText(label) {
   return out.replace(/%\s+\)/g, '%)').replace(/\s+/g, ' ').trim();
 }
 
+function normalizeSentenceText(text) {
+  return String(text ?? '')
+    .replace(/\u00A0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 const FINANCIAL_LABEL_NORMALIZED_EN = Object.fromEntries(
   Object.entries(FINANCIAL_LABEL_EN_ES).map(([en, es]) => [
     normalizeLabelText(en).toLowerCase(),
@@ -632,7 +639,7 @@ const FIN_REPLACERS_EN = compileReplacers(FIN_LABEL_ENTRIES_REVERSED);
 
 function localizeDynamicText(text) {
   if (!text) return text;
-  let out = normalizeLabelText(String(text));
+  let out = normalizeSentenceText(text);
 
   const metricReplacers =
     currentLang === 'es' ? METRIC_REPLACERS_ES : METRIC_REPLACERS_EN;
@@ -667,7 +674,7 @@ function parseMetricDetail(detail) {
   if (!normalized) return null;
 
   const segments = normalized
-    .split(/\s*[•|]\s*/)
+    .split(/\s*•\s*|\s+\|\s+/)
     .map((segment) => segment.trim())
     .filter(Boolean);
 
@@ -859,17 +866,16 @@ function isNonPeriodLabel(label) {
 function toSeries(row, options = {}) {
   if (!row?.values?.length) return [];
   const excludeLTM = options.excludeLTM !== false;
-  return row.values
+  const series = row.values
     .map((v, i) => ({
       date: row.dates?.[i] ?? String(i),
       value: parseNumber(v)
     }))
-    .filter(
-      (p) =>
-        p.value !== null &&
-        (!excludeLTM || !isLTM(p.date)) &&
-        !isNonPeriodLabel(p.date)
-    );
+    .filter((p) => p.value !== null && !isNonPeriodLabel(p.date));
+
+  if (!excludeLTM) return series;
+  const withoutLtm = series.filter((p) => !isLTM(p.date));
+  return withoutLtm.length ? withoutLtm : series;
 }
 
 function alignByDate(rowA, rowB, n = 6, options = {}) {
@@ -885,13 +891,32 @@ function alignByDate(rowA, rowB, n = 6, options = {}) {
 
 function ratioPctSeries(numerRow, denomRow, n = 6, options = {}) {
   const pairs = alignByDate(numerRow, denomRow, n, options);
-  const series = pairs
-    .map((p) =>
-      p.b ? (Math.abs(p.a) / Math.abs(p.b)) * 100 : null
-    )
-    .filter((v) => v !== null);
-  series.labels = pairs.map((p) => p.date);
+  const series = [];
+  const labels = [];
+  pairs.forEach((p) => {
+    if (!p.b) return;
+    series.push((Math.abs(p.a) / Math.abs(p.b)) * 100);
+    labels.push(p.date);
+  });
+  series.labels = labels;
   return { pairs, series };
+}
+
+function classifyGrowthValue(gr, bull = 15, neutral = 8) {
+  if (gr === null || gr === undefined || Number.isNaN(gr)) {
+    return { signal: 'info', text: 'Insufficient data' };
+  }
+  return {
+    signal: gr > bull ? 'bull' : gr > neutral ? 'neutral' : 'bear',
+    text:
+      gr > bull
+        ? 'Strong'
+        : gr > neutral
+          ? 'Moderate'
+          : gr > 0
+            ? 'Slow'
+            : 'Declining'
+  };
 }
 
 function classifyHigher(latest, bull, neutral, labels = {}) {
@@ -1340,9 +1365,16 @@ function extractPeriodYear(label) {
   const y4 = text.match(/(19|20)\d{2}/);
   if (y4) return Number(y4[0]);
 
-  const y2 = text.match(/\b(\d{2})\b/);
-  if (!y2) return null;
-  const yr = Number(y2[1]);
+  const dateLike = text.match(/(?:\d{1,2}[\/\-]\d{1,2}[\/\-])(\d{2})\b/);
+  if (dateLike) {
+    const yr = Number(dateLike[1]);
+    if (Number.isNaN(yr)) return null;
+    return yr >= 80 ? 1900 + yr : 2000 + yr;
+  }
+
+  const y2Tokens = text.match(/\b\d{2}\b/g);
+  if (!y2Tokens?.length) return null;
+  const yr = Number(y2Tokens[y2Tokens.length - 1]);
   if (Number.isNaN(yr)) return null;
   return yr >= 80 ? 1900 + yr : 2000 + yr;
 }
@@ -2672,6 +2704,79 @@ export function analyze(data, profile = 'default', options = {}) {
     );
   }
 
+  function resolveMarketCapLatest() {
+    const directMcRow =
+      findRowExact(
+        vm || is,
+        'Market Cap (MM)',
+        'Market Cap',
+        'Capitalización bursátil'
+      ) ||
+      findRowAny(vm || is, ['Market Cap', 'MM'], 'Capitalización bursátil', 'Market Cap');
+    const directMc = getLatest(directMcRow);
+    if (directMc !== null && directMc > 0) {
+      return { marketCap: directMc, source: 'reported' as const };
+    }
+
+    const sharesRow =
+      findRowExact(
+        bs,
+        'Total Shares Out. on Filing Date',
+        'Total Shares Outstanding on Filing Date'
+      ) ||
+      findRowAny(
+        bs,
+        ['Total Shares Out', 'Filing Date'],
+        ['Shares Outstanding', 'Filing Date']
+      );
+    const sharesOutstandingM = getLatest(sharesRow);
+    const price = Number.isFinite(data.priceNum) ? data.priceNum : null;
+
+    if (
+      sharesOutstandingM !== null &&
+      sharesOutstandingM > 0 &&
+      price !== null &&
+      price > 0
+    ) {
+      return {
+        marketCap: sharesOutstandingM * price,
+        source: 'derived_from_price_x_shares' as const
+      };
+    }
+
+    return {
+      marketCap: directMc,
+      source: 'invalid' as const
+    };
+  }
+
+  function resolveEnterpriseValueLatest() {
+    const evRow =
+      findRowExact(
+        vm || is,
+        'Total Enterprise Value (MM)',
+        'Total Enterprise Value',
+        'Enterprise Value',
+        'TEV',
+        'Valor total de la empresa',
+        'Valor empresarial total'
+      ) ||
+      findRowAny(
+        vm || is,
+        ['Total Enterprise Value', 'MM'],
+        'Valor total de la empresa',
+        'Valor empresarial total',
+        'Total Enterprise Value',
+        'Enterprise Value',
+        'TEV'
+      );
+
+    return {
+      enterpriseValue: getLatest(evRow),
+      row: evRow
+    };
+  }
+
   function sumLatestRows(section, ...keywordSets) {
     if (!section) return null;
     const rows = [];
@@ -2806,6 +2911,7 @@ export function analyze(data, profile = 'default', options = {}) {
     const years = cagrWindow?.years ?? null;
     const startValue = cagrWindow?.startValue ?? null;
     const endValue = cagrWindow?.endValue ?? null;
+    const growthClass = classifyGrowthValue(gr, 15, 8);
     growthItems.push(
       makeItem(
         'Revenue Growth (CAGR)',
@@ -2813,14 +2919,8 @@ export function analyze(data, profile = 'default', options = {}) {
           ? `${years}Y CAGR: ${gr.toFixed(1)}%`
           : 'Insufficient data',
         vals,
-        gr > 15 ? 'bull' : gr > 8 ? 'neutral' : 'bear',
-        gr > 15
-          ? 'Strong'
-          : gr > 8
-            ? 'Moderate'
-            : gr > 0
-              ? 'Slow'
-              : 'Declining',
+        growthClass.signal,
+        growthClass.text,
         startValue !== null && endValue !== null
           ? `Revenue: ${startValue.toFixed(0)} → ${endValue.toFixed(0)}`
           : ''
@@ -2866,6 +2966,7 @@ export function analyze(data, profile = 'default', options = {}) {
     const years = vals.length - 1;
     const growth = safeGrowthScore(vals);
     const gr = growth.value;
+    const growthClass = classifyGrowthValue(gr, 15, 8);
     growthItems.push(
       makeItem(
         'EPS Growth (Diluted)',
@@ -2873,8 +2974,14 @@ export function analyze(data, profile = 'default', options = {}) {
           ? `${growth.kind === 'cagr' ? `${years}Y CAGR` : 'Median YoY'}: ${gr.toFixed(1)}%`
           : 'N/A',
         vals,
-        gr > 15 ? 'bull' : gr > 8 ? 'neutral' : 'bear',
-        gr > 15 ? 'Excellent' : gr > 8 ? 'Good' : 'Weak'
+        growthClass.signal,
+        gr === null
+          ? growthClass.text
+          : gr > 15
+            ? 'Excellent'
+            : gr > 8
+              ? 'Good'
+              : 'Weak'
       )
     );
   }
@@ -4856,31 +4963,25 @@ export function analyze(data, profile = 'default', options = {}) {
 
   // Market Cap & EV
   const vmOrIS = vm || is;
-  const mcRow = findRowAny(vmOrIS, 'Capitalización bursátil', 'Market Cap');
-  const evRow = findRowAny(
-    vmOrIS,
-    'Valor total de la empresa',
-    'Valor empresarial total',
-    'Total Enterprise Value',
-    'Enterprise Value',
-    'TEV'
-  );
-  const mcLatestForValidation = getLatest(mcRow);
-  const evLatestForValidation = getLatest(evRow);
+  const evResolution = resolveEnterpriseValueLatest();
+  const evRow = evResolution.row;
+  const mcResolution = resolveMarketCapLatest();
+  const mcLatestForValidation = mcResolution.marketCap;
+  const evLatestForValidation = evResolution.enterpriseValue;
   const evIsValid =
     mcLatestForValidation !== null &&
     evLatestForValidation !== null &&
     mcLatestForValidation > 0 &&
     evLatestForValidation > 0;
-  if (mcRow && evRow) {
-    const mc = getLatest(mcRow);
-    const ev = getLatest(evRow);
+  if (mcLatestForValidation !== null && evRow) {
+    const mc = mcLatestForValidation;
+    const ev = evLatestForValidation;
     if (mc !== null && ev !== null) {
       if (mc <= 0 || ev <= 0) {
         valItems.push(
           makeItem(
             'Enterprise Value vs Market Cap',
-            `MC: $${(mc / 1000).toFixed(1)}B | EV: $${(ev / 1000).toFixed(1)}B`,
+            `MC: $${(mc / 1000).toFixed(1)}B | EV: $${(ev / 1000).toFixed(1)}B${mcResolution.source === 'derived_from_price_x_shares' ? ' (MC from price × shares)' : ''}`,
             [],
             'info',
             'Invalid valuation datapoint ⚠️',
@@ -4893,7 +4994,7 @@ export function analyze(data, profile = 'default', options = {}) {
         valItems.push(
           makeItem(
             'Enterprise Value vs Market Cap',
-            `MC: $${(mc / 1000).toFixed(1)}B | EV: $${(ev / 1000).toFixed(1)}B (${evPremium > 0 ? '+' : ''}${evPremium.toFixed(0)}%)`,
+            `MC: $${(mc / 1000).toFixed(1)}B | EV: $${(ev / 1000).toFixed(1)}B (${evPremium > 0 ? '+' : ''}${evPremium.toFixed(0)}%)${mcResolution.source === 'derived_from_price_x_shares' ? ' | MC from price × shares' : ''}`,
             [],
             evInvalid
               ? 'neutral'
@@ -5505,8 +5606,8 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   // Total shareholder yield = buybacks + dividends / market cap
-  if ((buybackRow || divPaidRow) && mcRow) {
-    const mc = getLatest(mcRow);
+  if (buybackRow || divPaidRow) {
+    const mc = mcResolution.marketCap;
     const bb = buybackRow ? Math.abs(getLatest(buybackRow) || 0) : 0;
     const div = divPaidRow ? Math.abs(getLatest(divPaidRow) || 0) : 0;
     if (mc && mc > 0) {
@@ -5516,7 +5617,7 @@ export function analyze(data, profile = 'default', options = {}) {
         shItems.push(
           makeItem(
             'Total Shareholder Yield',
-            `${totalYield.toFixed(1)}% (Buybacks: $${bb.toFixed(0)}M + Dividends: $${div.toFixed(0)}M)`,
+            `${totalYield.toFixed(1)}% (Buybacks: $${bb.toFixed(0)}M + Dividends: $${div.toFixed(0)}M)${mcResolution.source === 'derived_from_price_x_shares' ? ' | MC from price × shares' : ''}`,
             [],
             extremeYield ? 'info' : totalYield > 5 ? 'bull' : 'neutral',
             extremeYield
@@ -5994,11 +6095,18 @@ export function analyze(data, profile = 'default', options = {}) {
     ['Deuda', 'corto']
   );
   const cfoLatest = getLatest(cfoRowCore);
+  const ltInvCore = findRowAny(
+    bs,
+    'Long-Term Investments',
+    'Long Term Investments',
+    'Inversiones a largo plazo'
+  );
   const debtL = getLatest(debtRow),
     cashL = getLatest(cashRowCore) || 0,
-    stInvL = getLatest(stInvCore2) || 0;
+    stInvL = getLatest(stInvCore2) || 0,
+    ltInvL = getLatest(ltInvCore) || 0;
   if (debtL !== null) {
-    const netDebt = debtL - (cashL + stInvL);
+    const netDebt = debtL - (cashL + stInvL + ltInvL);
     balanceItems.push(
       makeItem(
         'Net Debt / Net Cash',
@@ -6026,13 +6134,25 @@ export function analyze(data, profile = 'default', options = {}) {
     );
   }
 
-  const currentPortionLtDebtRow = findRowAny(
+  const currentPortionLtDebtRow =
+    findRowExact(
+      bs,
+      'Current Portion of LT Debt',
+      'Current Portion of Long-Term Debt',
+      'Current Portion Long-Term Debt'
+    ) ||
+    findRowAny(
+      bs,
+      'Current Portion of LT Debt',
+      'Current Portion of Long-Term Debt',
+      'Current Portion Long-Term Debt'
+    );
+  const ltDebtRowReality = findRowExact(
     bs,
-    'Current Portion of LT Debt',
-    'Current Portion of Long-Term Debt',
-    'Current Portion Long-Term Debt'
+    'Long-Term Debt',
+    'Long Term Debt',
+    'Deuda a largo plazo'
   );
-  const ltDebtRowReality = findRowAny(bs, 'Long-Term Debt', 'Long Term Debt', 'Deuda a largo plazo');
   if (currentPortionLtDebtRow && ltDebtRowReality) {
     const cpLatest = getLatest(currentPortionLtDebtRow);
     const ltLatest = getLatest(ltDebtRowReality);
@@ -6057,10 +6177,11 @@ export function analyze(data, profile = 'default', options = {}) {
   }
 
   const ndEbitdaRealityRow = findRowAny(ratios, 'Net Debt / EBITDA');
+  const netDebtRowReality = findRowAny(bs, 'Net Debt');
   if (ndEbitdaRealityRow && debtL !== null) {
     const ndEbitdaLatest = getLatest(ndEbitdaRealityRow);
     if (ndEbitdaLatest !== null) {
-      const netDebt = debtL - (cashL + stInvL);
+      const netDebt = getLatest(netDebtRowReality) ?? debtL - (cashL + stInvL + ltInvL);
       const signMismatch = (netDebt < 0 && ndEbitdaLatest > 0) || (netDebt > 0 && ndEbitdaLatest < 0);
       if (signMismatch) {
         balanceItems.push(
