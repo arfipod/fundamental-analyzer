@@ -656,7 +656,8 @@ describe('cost and null-safety regressions', () => {
     const cogs = costs?.items.find((item) => item.name === 'COGS as % of Revenue');
 
     expect(cogs).toBeTruthy();
-    expect(cogs?.values ? [...cogs.values] : cogs?.values).toEqual([40, 45, 40]);
+    const cogsValues = Array.isArray(cogs?.values) ? Array.from(cogs.values) : [];
+    expect(cogsValues).toEqual([40, 45, 40]);
   });
 
 
@@ -684,7 +685,8 @@ describe('cost and null-safety regressions', () => {
     const cogs = costs?.items.find((item) => item.name === 'COGS as % of Revenue');
 
     expect(cogs).toBeTruthy();
-    expect(cogs?.values ? [...cogs.values] : cogs?.values).toEqual([40, 40]);
+    const cogsValues = Array.isArray(cogs?.values) ? Array.from(cogs.values) : [];
+    expect(cogsValues).toEqual([40, 40]);
     expect(cogs?.detail).toContain('Latest: 40.0%');
   });
 
